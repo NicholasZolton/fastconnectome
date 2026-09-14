@@ -29,6 +29,10 @@ packages = ["src/fastconnectome"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["examples"]
+
+[tool.ty.environment]
+extra-paths = ["examples"]
 
 [tool.uv.sources]
 stonkfly = { git = "https://github.com/nftechie/stonkfly.git", rev = "78ef3e05ab0fa086032098558d893667068944a0" }

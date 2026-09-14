@@ -2,6 +2,7 @@
 
 import argparse
 from dataclasses import asdict, dataclass
+from enum import StrEnum
 import json
 from pathlib import Path
 
@@ -25,14 +26,29 @@ class PongState:
     misses: int = 0
 
 
+class PongReward(StrEnum):
+    SPARSE = "sparse"
+    TRACKING = "tracking"
+
+
 class Pong:
     width = 320
     height = 180
     paddle_width = 52
 
-    def __init__(self, seed: int = 7) -> None:
+    def __init__(
+        self,
+        seed: int = 7,
+        *,
+        reward: PongReward = PongReward.SPARSE,
+        tracking_tolerance: float = 26.0,
+    ) -> None:
+        if not np.isfinite(tracking_tolerance) or tracking_tolerance < 0:
+            raise ValueError("tracking_tolerance must be finite and nonnegative")
         self._initial_seed = seed & 0xFFFFFFFF
         self._rng_state = self._initial_seed
+        self.reward = reward
+        self.tracking_tolerance = tracking_tolerance
         self.state = PongState()
 
     def _direction(self) -> float:
@@ -76,7 +92,20 @@ class Pong:
             state.ball_y = self.height * 0.35
             state.ball_vx = self._direction()
             state.ball_vy = 3.0
-        return EnvironmentStep(self.render(), reward=reward)
+        alignment_error = abs(
+            state.ball_x - (state.paddle_x + self.paddle_width / 2)
+        )
+        aligned = alignment_error <= self.tracking_tolerance
+        if self.reward == PongReward.TRACKING:
+            reward = 1.0 if aligned else -1.0
+        return EnvironmentStep(
+            self.render(),
+            reward=reward,
+            info={
+                "alignment_error": alignment_error,
+                "aligned": aligned,
+            },
+        )
 
     def render(self) -> RGBFrame:
         state = self.state
@@ -96,6 +125,8 @@ class Pong:
             "schema": 1,
             "type": "fastconnectome-pong-v1",
             "initial_seed": self._initial_seed,
+            "reward": self.reward.value,
+            "tracking_tolerance": self.tracking_tolerance,
             "rng_state": self._rng_state,
             "state": asdict(self.state),
         }
@@ -115,6 +146,8 @@ class Pong:
             raw.get("schema") != 1
             or raw.get("type") != "fastconnectome-pong-v1"
             or raw.get("initial_seed") != self._initial_seed
+            or raw.get("reward", PongReward.SPARSE.value) != self.reward.value
+            or raw.get("tracking_tolerance", 26.0) != self.tracking_tolerance
             or not isinstance(raw.get("rng_state"), int)
             or not isinstance(state_raw, dict)
         ):
@@ -160,6 +193,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--steps", type=int, default=1200)
+    parser.add_argument(
+        "--reward",
+        type=PongReward,
+        choices=list(PongReward),
+        default=PongReward.SPARSE,
+    )
+    parser.add_argument("--tracking-tolerance", type=float, default=26.0)
     args = parser.parse_args()
 
     import pygame
@@ -168,7 +208,10 @@ def main() -> None:
     screen = pygame.display.set_mode((960, 540))
     pygame.display.set_caption("FastConnectome Pong")
     font = pygame.font.SysFont("monospace", 18)
-    game = Pong()
+    game = Pong(
+        reward=args.reward,
+        tracking_tolerance=args.tracking_tolerance,
+    )
     fly = Agent.from_preset("malecns-visual-turning", data_dir=args.data_dir)
 
     def display(

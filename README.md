@@ -141,6 +141,17 @@ It reports both behavioral scores and changed synapses. A single improved run is
 not presented as evidence of learning; repeat evaluation over held-out seeds is
 still required.
 
+For a deliberately easier mechanism check, dense tracking reward gives `+1`
+when the paddle and ball centers are within 26 horizontal pixels and `-1`
+otherwise:
+
+```sh
+uv run python examples/train_pong.py --data-dir data --reward tracking
+```
+
+This assay makes reward frequent and reports aligned steps, but it still keeps
+behavioral score and changed synapses separate.
+
 ## Runners
 
 `run_episode` is synchronous and deterministic. `RealtimeRunner` advances an
