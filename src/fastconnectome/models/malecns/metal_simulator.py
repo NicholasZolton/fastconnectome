@@ -57,7 +57,7 @@ class MetalMaleCNS(MaleCNS):
         self,
         stimulus: RGBFrame,
         duration_ms: float,
-        stimulation: tuple[NDArray[np.int32], float] | None,
+        stimulation: list[tuple[NDArray[np.int32], float]],
     ) -> tuple[NDArray[np.int32], float]:
         from stonkfly.neural.rule import advance
         from stonkfly.neural.sensory import retinal_samples
@@ -98,8 +98,7 @@ class MetalMaleCNS(MaleCNS):
         self._brain.drive[self._brain.r8] += (
             30 * self._brain.r8_light / (0.02 + self._brain.r8_light)
         )
-        if stimulation is not None:
-            indices, current = stimulation
+        for indices, current in stimulation:
             self._brain.drive[indices] += np.float32(current)
 
         counts, event_indices, event_clocks, elapsed = self._metal.advance(

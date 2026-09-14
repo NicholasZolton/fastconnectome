@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import tempfile
@@ -30,6 +31,22 @@ class CurrentPulse:
     duration_ms: float
     current: float
     label: str
+
+
+@dataclass(frozen=True, slots=True)
+class PopulationCurrent:
+    """Apply a declared current to one annotated population for an agent step."""
+
+    population: str
+    current: float
+
+
+@dataclass(frozen=True, slots=True)
+class MaleCNSStimulus:
+    """Combine an RGB observation with explicit experimental neural currents."""
+
+    frame: RGBFrame
+    currents: tuple[PopulationCurrent, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,12 +159,24 @@ class MaleCNS:
 
     def advance(
         self,
-        stimulus: RGBFrame,
+        stimulus: RGBFrame | MaleCNSStimulus,
         reinforcement: CurrentPulse | None,
         duration_ms: float,
     ) -> SimulationResult[NeuralActivity]:
         if duration_ms <= 0:
             raise ValueError("duration_ms must be positive")
+        frame = stimulus.frame if isinstance(stimulus, MaleCNSStimulus) else stimulus
+        sensory_currents: list[tuple[NDArray[np.int32], float]] = []
+        if isinstance(stimulus, MaleCNSStimulus):
+            for population_current in stimulus.currents:
+                if not math.isfinite(population_current.current):
+                    raise ValueError("Population current must be finite")
+                indices = self.populations.select(population_current.population)
+                if not len(indices):
+                    raise ValueError(
+                        f"Unknown stimulus population {population_current.population!r}"
+                    )
+                sensory_currents.append((indices, population_current.current))
         if reinforcement is not None:
             indices = self.populations.select(reinforcement.population)
             if not len(indices):
@@ -164,12 +193,14 @@ class MaleCNS:
         )
         while remaining_ms > 1e-12:
             interval_ms = min(self.neural_bin_ms, remaining_ms)
-            stimulation: tuple[NDArray[np.int32], float] | None = None
+            stimulation = list(sensory_currents)
             if self._pending_pulse is not None and self._pulse_remaining_ms > 0:
                 interval_ms = min(interval_ms, self._pulse_remaining_ms)
-                stimulation = (self._pulse_indices, self._pending_pulse.current)
+                stimulation.append(
+                    (self._pulse_indices, self._pending_pulse.current)
+                )
             current_counts, elapsed = self._rgb_step(
-                stimulus,
+                frame,
                 interval_ms,
                 stimulation,
             )
@@ -208,7 +239,7 @@ class MaleCNS:
         self,
         stimulus: RGBFrame,
         duration_ms: float,
-        stimulation: tuple[NDArray[np.int32], float] | None,
+        stimulation: list[tuple[NDArray[np.int32], float]],
     ) -> tuple[NDArray[np.int32], float]:
         return self._brain.rgb_step(
             stimulus,

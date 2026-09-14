@@ -4,7 +4,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from fastconnectome.models.malecns import CurrentPulse, MaleCNS, MetalMaleCNS
+from fastconnectome.models.malecns import (
+    CurrentPulse,
+    MaleCNS,
+    MaleCNSStimulus,
+    MetalMaleCNS,
+    PopulationCurrent,
+)
 from fastconnectome.models.malecns.metal import metal_available
 
 DATA_DIR = os.environ.get("FASTCONNECTOME_MALECNS_DATA")
@@ -39,6 +45,16 @@ def test_metal_matches_reward_learning_and_checkpoint(
                 metal_result.activity.counts,
             )
             assert cpu_result.learning_summary == metal_result.learning_summary
+
+        conditioned = MaleCNSStimulus(
+            frame,
+            (PopulationCurrent("KCab-m", 40),),
+        )
+        reinforcement = CurrentPulse("PAM11", 20, 20, "positive")
+        cpu_result = cpu.advance(conditioned, reinforcement, 20)
+        metal_result = metal.advance(conditioned, reinforcement, 20)
+        assert np.array_equal(cpu_result.activity.counts, metal_result.activity.counts)
+        assert cpu_result.learning_summary == metal_result.learning_summary
 
         assert np.array_equal(cpu._brain.memory_u, metal._brain.memory_u)
         assert np.array_equal(cpu._brain.memory_w, metal._brain.memory_w)

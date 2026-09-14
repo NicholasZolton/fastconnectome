@@ -154,6 +154,23 @@ behavioral score and changed synapses separate.
 
 ### A learning example that passes
 
+For a controlled test in which learning occurs only on the existing KC→MBON
+connections, run:
+
+```sh
+uv run python examples/learn_kc_mbon.py --data-dir data
+```
+
+This pairs direct stimulation of one declared KC population with PAM11, then
+loads the learned KC→MBON overlay into a fresh frozen simulator. A fixed MBON07
+threshold changes from `avoid` to `approach` only for the paired cue. A
+counterbalanced arm pairs the other KC population and reverses which cue elicits
+`approach`. The example also checks no-reward training, frozen plasticity, and
+memory erasure. Direct population current is an explicit controlled-stimulation
+assay—not a claim that the present RGB pathway supports natural conditioning.
+
+### Learned-readout positive control
+
 `train_pong.py` deliberately tests the unvalidated KC→MBON plasticity pathway;
 it can change synapses without improving Pong. For a smaller positive control,
 train an action-aware linear readout on frozen full-connectome activity:

@@ -9,7 +9,9 @@ from fastconnectome.models.malecns.adapters import (
 from fastconnectome.models.malecns.simulator import (
     CurrentPulse,
     MaleCNS,
+    MaleCNSStimulus,
     NeuralActivity,
+    PopulationCurrent,
     PopulationIndex,
 )
 from fastconnectome.models.malecns.metal_simulator import MetalMaleCNS
@@ -20,8 +22,10 @@ __all__ = [
     "CurrentPulse",
     "DopamineValence",
     "MaleCNS",
+    "MaleCNSStimulus",
     "MetalMaleCNS",
     "NeuralActivity",
+    "PopulationCurrent",
     "PopulationIndex",
     "Turn",
 ]
