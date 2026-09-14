@@ -1,9 +1,9 @@
 """Minimal real-time Pong example using the MaleCNS visual-turning preset."""
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+import json
 from pathlib import Path
-import random
 
 import numpy as np
 from numpy.typing import NDArray
@@ -31,13 +31,17 @@ class Pong:
     paddle_width = 52
 
     def __init__(self, seed: int = 7) -> None:
-        self.random = random.Random(seed)
+        self._initial_seed = seed & 0xFFFFFFFF
+        self._rng_state = self._initial_seed
         self.state = PongState()
 
+    def _direction(self) -> float:
+        self._rng_state = (1664525 * self._rng_state + 1013904223) & 0xFFFFFFFF
+        return -3.4 if self._rng_state < 0x80000000 else 3.4
+
     def reset(self) -> RGBFrame:
-        self.state = PongState(
-            ball_vx=-3.4 if self.random.random() < 0.5 else 3.4
-        )
+        self._rng_state = self._initial_seed
+        self.state = PongState(ball_vx=self._direction())
         return self.render()
 
     def step(self, action: Turn) -> EnvironmentStep[RGBFrame]:
@@ -70,7 +74,7 @@ class Pong:
             reward = -1.0
             state.ball_x = self.width / 2
             state.ball_y = self.height * 0.35
-            state.ball_vx = -3.4 if self.random.random() < 0.5 else 3.4
+            state.ball_vx = self._direction()
             state.ball_vy = 3.0
         return EnvironmentStep(self.render(), reward=reward)
 
@@ -86,6 +90,70 @@ class Pong:
         y = int(state.ball_y)
         frame[max(0, y - 4) : y + 5, max(0, x - 4) : x + 5] = (218, 62, 68)
         return frame
+
+    def save(self, path: Path) -> None:
+        manifest = {
+            "schema": 1,
+            "type": "fastconnectome-pong-v1",
+            "initial_seed": self._initial_seed,
+            "rng_state": self._rng_state,
+            "state": asdict(self.state),
+        }
+        with path.open("wb") as handle:
+            np.savez_compressed(
+                handle,
+                manifest=json.dumps(manifest, allow_nan=False),
+            )
+
+    def restore(self, path: Path) -> RGBFrame:
+        with np.load(path, allow_pickle=False) as archive:
+            raw: object = json.loads(str(archive["manifest"]))
+        if not isinstance(raw, dict):
+            raise ValueError("Invalid Pong checkpoint")
+        state_raw = raw.get("state")
+        if (
+            raw.get("schema") != 1
+            or raw.get("type") != "fastconnectome-pong-v1"
+            or raw.get("initial_seed") != self._initial_seed
+            or not isinstance(raw.get("rng_state"), int)
+            or not isinstance(state_raw, dict)
+        ):
+            raise ValueError("Pong checkpoint configuration mismatch")
+        values = [
+            state_raw.get("paddle_x"),
+            state_raw.get("ball_x"),
+            state_raw.get("ball_y"),
+            state_raw.get("ball_vx"),
+            state_raw.get("ball_vy"),
+        ]
+        hits = state_raw.get("hits")
+        misses = state_raw.get("misses")
+        if (
+            not all(
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and np.isfinite(value)
+                for value in values
+            )
+            or not isinstance(hits, int)
+            or isinstance(hits, bool)
+            or hits < 0
+            or not isinstance(misses, int)
+            or isinstance(misses, bool)
+            or misses < 0
+        ):
+            raise ValueError("Invalid Pong checkpoint state")
+        self._rng_state = int(raw["rng_state"])
+        self.state = PongState(
+            paddle_x=float(values[0]),
+            ball_x=float(values[1]),
+            ball_y=float(values[2]),
+            ball_vx=float(values[3]),
+            ball_vy=float(values[4]),
+            hits=hits,
+            misses=misses,
+        )
+        return self.render()
 
 
 def main() -> None:

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -48,3 +50,17 @@ def test_bilateral_turn_uses_rolling_firing_rates() -> None:
     assert first.action is Turn.RIGHT
     assert second.action is Turn.LEFT
     assert second.metrics["readout_window_ms"] == 200
+
+
+def test_bilateral_turn_checkpoint_preserves_readout_window(tmp_path: Path) -> None:
+    original = BilateralTurn(window_ms=200, deadband_hz=2)
+    original.decode(activity([0, 1, 0]), 100)
+    checkpoint = tmp_path / "decoder.npz"
+    original.save(checkpoint)
+
+    restored = BilateralTurn(window_ms=200, deadband_hz=2)
+    restored.restore(checkpoint)
+
+    assert restored.decode(activity([2, 0, 0]), 100) == original.decode(
+        activity([2, 0, 0]), 100
+    )

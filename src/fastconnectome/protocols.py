@@ -1,9 +1,15 @@
 """Composable contracts behind a FastConnectome agent."""
 
 from pathlib import Path
-from typing import Protocol, TypeVar
+from typing import Protocol, TypeVar, runtime_checkable
 
-from fastconnectome.types import DecodedAction, EnvironmentStep, ModelInfo, SimulationResult
+from fastconnectome.types import (
+    DecodedAction,
+    EnvironmentStep,
+    MetricValue,
+    ModelInfo,
+    SimulationResult,
+)
 
 ObservationT_contra = TypeVar("ObservationT_contra", contravariant=True)
 EnvironmentObservationT = TypeVar("EnvironmentObservationT")
@@ -42,7 +48,6 @@ class Simulator(Protocol[StimulusT_contra, ReinforcementT_contra, ActivityT]):
 
     def restore(self, path: Path) -> None: ...
 
-
 class ActionDecoder(Protocol[ActivityT_contra, ActionT]):
     def decode(
         self, activity: ActivityT_contra, duration_ms: float
@@ -51,9 +56,40 @@ class ActionDecoder(Protocol[ActivityT_contra, ActionT]):
     def reset(self) -> None: ...
 
 
+@runtime_checkable
+class Configurable(Protocol):
+    def configuration(self) -> dict[str, MetricValue]: ...
+
+
+@runtime_checkable
+class Checkpointable(Protocol):
+    def save(self, path: Path) -> None: ...
+
+    def restore(self, path: Path) -> None: ...
+
+
+@runtime_checkable
+class PolicyArtifact(Protocol):
+    def export_policy(self, path: Path, manifest: dict[str, object]) -> None: ...
+
+    def import_policy(self, path: Path, manifest: dict[str, object]) -> None: ...
+
+
 class Environment(Protocol[EnvironmentObservationT, ActionT_contra]):
     def reset(self) -> EnvironmentObservationT: ...
 
     def step(
         self, action: ActionT_contra
     ) -> EnvironmentStep[EnvironmentObservationT]: ...
+
+
+class CheckpointableEnvironment(Protocol[EnvironmentObservationT, ActionT_contra]):
+    def reset(self) -> EnvironmentObservationT: ...
+
+    def step(
+        self, action: ActionT_contra
+    ) -> EnvironmentStep[EnvironmentObservationT]: ...
+
+    def save(self, path: Path) -> None: ...
+
+    def restore(self, path: Path) -> EnvironmentObservationT: ...

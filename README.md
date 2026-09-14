@@ -82,12 +82,60 @@ Reinforcement:      numeric reward -> simulator reinforcement
 ## Lifecycle
 
 ```python
-fly.save("runs/brain.npz")
-fly.restore("runs/brain.npz")
+fly.save("runs/agent.fccheckpoint")
+fly.restore("runs/agent.fccheckpoint")
 
-fly.reset()                    # reset state and learned weights
-fly.reset(keep_learning=True)  # reset activity but retain learned weights
+fly.reset()                    # training agent: reset state and learned weights
+fly.reset(keep_learning=True)  # training agent: retain learned weights
 ```
+
+An agent checkpoint contains neural state, plasticity traces, pending dopamine
+pulse, learned weights, and decoder history. For exact synchronous training
+continuation, checkpoint the environment and pending reward as well:
+
+```python
+from fastconnectome import TrainingSession
+
+session = TrainingSession(fly, environment)
+session.run(500)
+session.save_checkpoint("runs/training.fccheckpoint")
+session.restore_checkpoint("runs/training.fccheckpoint")
+```
+
+The environment implements `save()` and `restore()` to preserve its own state
+and random generator. Real-time sessions intentionally are not claimed to resume
+exactly because thread scheduling can change which observations are superseded.
+
+## Train and deploy
+
+A deployment policy is a learned-weight overlay, not a paused experiment:
+
+```python
+fly.export_policy("models/pong.fcmodel")
+
+deployed = Agent.load_policy(
+    "models/pong.fcmodel",
+    data_dir="data",
+)
+```
+
+Loading validates the model graph, dynamics, and adapter configuration; applies
+the learned KC→MBON weights to a fresh connectome; clears transient state; and
+freezes plasticity. The baseline graph remains in the model cache, so the policy
+artifact is only tens of KiB. Resetting a deployed agent retains its policy.
+
+The headless Pong showcase evaluates a frozen baseline, trains synchronously,
+verifies exact checkpoint replay, exports a policy, loads a fresh frozen agent,
+and evaluates it on the same scenario. Defaults finish in roughly two minutes
+on the reference machine:
+
+```sh
+uv run python examples/train_pong.py --data-dir data
+```
+
+It reports both behavioral scores and changed synapses. A single improved run is
+not presented as evidence of learning; repeat evaluation over held-out seeds is
+still required.
 
 ## Runners
 

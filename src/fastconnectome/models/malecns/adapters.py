@@ -4,6 +4,7 @@ from collections import deque
 from dataclasses import dataclass
 from enum import StrEnum
 import math
+from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
@@ -31,6 +32,9 @@ class CompoundEye:
         ):
             raise ValueError("CompoundEye requires an H×W×3 uint8 RGB frame")
         return observation
+
+    def configuration(self) -> dict[str, str]:
+        return {"type": "compound-eye-v1"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +67,16 @@ class DopamineValence:
                 self.negative, self.duration_ms, self.current, "negative"
             )
         return None
+
+    def configuration(self) -> dict[str, str | float]:
+        return {
+            "type": "dopamine-valence-v1",
+            "positive": self.positive,
+            "negative": self.negative,
+            "duration_ms": self.duration_ms,
+            "current": self.current,
+            "deadband": self.deadband,
+        }
 
 
 class BilateralTurn:
@@ -150,3 +164,58 @@ class BilateralTurn:
     def reset(self) -> None:
         self._samples.clear()
         self._sample_ms = 0.0
+
+    def configuration(self) -> dict[str, str | float]:
+        configuration: dict[str, str | float] = {
+            "type": "bilateral-turn-v1",
+            "cell_type": self.cell_type,
+            "left_side": self.left_side,
+            "right_side": self.right_side,
+            "window_ms": self.window_ms,
+            "deadband_hz": self.deadband_hz,
+        }
+        if self.gate_cell_type is not None:
+            configuration["gate_cell_type"] = self.gate_cell_type
+        return configuration
+
+    def save(self, path: Path) -> None:
+        samples = np.asarray(self._samples, dtype=np.float64)
+        if not len(samples):
+            samples = np.empty((0, 4), dtype=np.float64)
+        with path.open("wb") as handle:
+            np.savez_compressed(
+                handle,
+                samples=samples,
+                sample_ms=np.asarray(self._sample_ms, dtype=np.float64),
+            )
+
+    def restore(self, path: Path) -> None:
+        with np.load(path, allow_pickle=False) as archive:
+            samples = archive["samples"]
+            sample_ms = float(archive["sample_ms"])
+        if (
+            samples.ndim != 2
+            or samples.shape[1:] != (4,)
+            or not np.isfinite(samples).all()
+            or not math.isfinite(sample_ms)
+            or sample_ms < 0
+        ):
+            raise ValueError("Invalid bilateral decoder checkpoint")
+        restored: deque[tuple[int, int, int, float]] = deque()
+        for left, right, gate, duration_ms in samples:
+            if (
+                left < 0
+                or right < 0
+                or gate < 0
+                or duration_ms <= 0
+                or not left.is_integer()
+                or not right.is_integer()
+                or not gate.is_integer()
+            ):
+                raise ValueError("Invalid bilateral decoder sample")
+            restored.append((int(left), int(right), int(gate), float(duration_ms)))
+        expected_ms = sum(sample[3] for sample in restored)
+        if not math.isclose(sample_ms, expected_ms, abs_tol=1e-9):
+            raise ValueError("Bilateral decoder duration mismatch")
+        self._samples = restored
+        self._sample_ms = sample_ms

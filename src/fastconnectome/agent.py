@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
+import json
+import os
 from pathlib import Path
+import tempfile
 from time import perf_counter
 from typing import Generic, TYPE_CHECKING, TypeVar
+import zipfile
 
 from fastconnectome.protocols import (
     ActionDecoder,
+    Checkpointable,
+    Configurable,
     ObservationEncoder,
+    PolicyArtifact,
     ReinforcementEncoder,
     Simulator,
 )
@@ -73,11 +80,77 @@ class Agent(Generic[ObservationT, StimulusT, ReinforcementT, ActivityT, ActionT]
         self._action.reset()
 
     def save(self, path: str | Path) -> None:
-        self._simulator.save(Path(path))
+        if not isinstance(self._action, Checkpointable):
+            raise TypeError("The action decoder does not support checkpoints")
+        destination = Path(path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_suffix(destination.suffix + ".partial")
+        with tempfile.TemporaryDirectory(dir=destination.parent) as directory:
+            root = Path(directory)
+            self._simulator.save(root / "simulator.npz")
+            self._action.save(root / "decoder.npz")
+            manifest = self._manifest("fastconnectome-agent-checkpoint")
+            (root / "manifest.json").write_text(
+                json.dumps(manifest, indent=2, allow_nan=False) + "\n"
+            )
+            with zipfile.ZipFile(
+                temporary, "w", compression=zipfile.ZIP_STORED
+            ) as archive:
+                for name in ("manifest.json", "simulator.npz", "decoder.npz"):
+                    archive.write(root / name, name)
+        os.replace(temporary, destination)
 
     def restore(self, path: str | Path) -> None:
-        self._simulator.restore(Path(path))
-        self._action.reset()
+        if not isinstance(self._action, Checkpointable):
+            raise TypeError("The action decoder does not support checkpoints")
+        source = Path(path)
+        with tempfile.TemporaryDirectory(dir=source.parent) as directory:
+            root = Path(directory)
+            with zipfile.ZipFile(source, "r") as archive:
+                expected = {"manifest.json", "simulator.npz", "decoder.npz"}
+                if set(archive.namelist()) != expected:
+                    raise ValueError("Unexpected agent checkpoint contents")
+                for name in expected:
+                    (root / name).write_bytes(archive.read(name))
+            raw: object = json.loads((root / "manifest.json").read_text())
+            if raw != self._manifest("fastconnectome-agent-checkpoint"):
+                raise ValueError("Agent checkpoint configuration mismatch")
+            self._simulator.restore(root / "simulator.npz")
+            self._action.restore(root / "decoder.npz")
+
+    def export_policy(self, path: str | Path) -> None:
+        if not isinstance(self._simulator, PolicyArtifact):
+            raise TypeError("The simulator does not support policy artifacts")
+        self._simulator.export_policy(
+            Path(path), self._manifest("fastconnectome-policy")
+        )
+
+    def _import_policy(self, path: Path) -> None:
+        if not isinstance(self._simulator, PolicyArtifact):
+            raise TypeError("The simulator does not support policy artifacts")
+        self._simulator.import_policy(
+            path, self._manifest("fastconnectome-policy")
+        )
+
+    def _manifest(self, kind: str) -> dict[str, object]:
+        return {
+            "schema": 1,
+            "kind": kind,
+            "model": asdict(self.info),
+            "neural_ms": self.neural_ms,
+            "observation": self._configuration(self._observation, "observation"),
+            "action": self._configuration(self._action, "action"),
+            "reinforcement": self._configuration(
+                self._reinforcement, "reinforcement"
+            ),
+            "simulator": self._configuration(self._simulator, "simulator"),
+        }
+
+    @staticmethod
+    def _configuration(component: object, role: str) -> dict[str, object]:
+        if not isinstance(component, Configurable):
+            raise TypeError(f"The {role} component does not expose its configuration")
+        return dict(component.configuration())
 
     @classmethod
     def from_preset(
@@ -87,6 +160,7 @@ class Agent(Generic[ObservationT, StimulusT, ReinforcementT, ActivityT, ActionT]
         data_dir: str | Path = Path("data"),
         dynamics: str = "stonkfly-v1",
         backend: str = "cpu",
+        learning: bool = True,
     ) -> Agent[
         NDArray[uint8],
         NDArray[uint8],
@@ -101,4 +175,23 @@ class Agent(Generic[ObservationT, StimulusT, ReinforcementT, ActivityT, ActionT]
             data_dir=Path(data_dir),
             dynamics=dynamics,
             backend=backend,
+            learning=learning,
         )
+
+    @classmethod
+    def load_policy(
+        cls,
+        path: str | Path,
+        *,
+        data_dir: str | Path = Path("data"),
+        backend: str = "cpu",
+    ) -> Agent[
+        NDArray[uint8],
+        NDArray[uint8],
+        CurrentPulse | None,
+        NeuralActivity,
+        Turn,
+    ]:
+        from fastconnectome.presets import load_policy
+
+        return load_policy(Path(path), data_dir=Path(data_dir), backend=backend)

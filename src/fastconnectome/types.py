@@ -78,3 +78,9 @@ class RunResult:
     total_reward: float
     terminated: bool
     truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SessionStep(Generic[ObservationT, ActionT]):
+    transition: EnvironmentStep[ObservationT]
+    agent: StepResult[ActionT]

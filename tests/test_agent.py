@@ -15,15 +15,22 @@ class LengthEncoder:
     def encode(self, observation: str) -> int:
         return len(observation)
 
+    def configuration(self) -> dict[str, str]:
+        return {"type": "length"}
+
 
 class SignedReward:
     def encode(self, reward: float) -> bool:
         return reward > 0
 
+    def configuration(self) -> dict[str, str]:
+        return {"type": "signed"}
+
 
 class FakeSimulator:
     def __init__(self) -> None:
         self.restored: Path | None = None
+        self.did_restore = False
         self.kept_learning = False
 
     @property
@@ -42,14 +49,19 @@ class FakeSimulator:
             {"stimulus": stimulus},
         )
 
+    def configuration(self) -> dict[str, str]:
+        return {"type": "fixture"}
+
     def reset(self, *, keep_learning: bool = False) -> None:
         self.kept_learning = keep_learning
 
     def save(self, path: Path) -> None:
         self.restored = path
+        path.write_text("simulator")
 
     def restore(self, path: Path) -> None:
         self.restored = path
+        self.did_restore = path.read_text() == "simulator"
 
 
 class EvenDecoder:
@@ -61,6 +73,15 @@ class EvenDecoder:
 
     def reset(self) -> None:
         self.resets += 1
+
+    def configuration(self) -> dict[str, str]:
+        return {"type": "even"}
+
+    def save(self, path: Path) -> None:
+        path.write_text(str(self.resets))
+
+    def restore(self, path: Path) -> None:
+        self.resets = int(path.read_text())
 
 
 def make_agent() -> tuple[
@@ -90,12 +111,14 @@ def test_agent_composes_adapters_and_reports_timing() -> None:
     assert agent.info.model == "fixture"
 
 
-def test_agent_resets_decoder_and_simulator() -> None:
+def test_agent_resets_decoder_and_simulator(tmp_path: Path) -> None:
     agent, simulator, decoder = make_agent()
 
+    checkpoint = tmp_path / "agent.fccheckpoint"
+    agent.save(checkpoint)
     agent.reset(keep_learning=True)
-    agent.restore("brain.npz")
+    agent.restore(checkpoint)
 
     assert simulator.kept_learning
-    assert simulator.restored == Path("brain.npz")
-    assert decoder.resets == 2
+    assert simulator.did_restore
+    assert decoder.resets == 0
