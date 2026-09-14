@@ -57,6 +57,18 @@ uv run python examples/quickstart_kc_mbon.py --data-dir data
 
 This is a controlled neural-stimulation task, not natural sensory conditioning.
 
+For an animated version, a tiny fixed template matcher turns synthetic dog and
+cat images into those two cues before the same KC→MBON training loop:
+
+```sh
+uv run python examples/learn_dogs.py --data-dir data
+```
+
+The animation labels the boundary explicitly: the pixel adapter recognizes the
+simple drawings, while the simulated mushroom body learns that the dog cue has
+positive value. It does not claim that KC→MBON plasticity learned real-world dog
+recognition. Pass `--no-animation` to run the experiment in a terminal.
+
 ## Minimal agent loop
 
 ```python
