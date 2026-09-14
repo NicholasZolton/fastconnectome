@@ -2,97 +2,148 @@
 
 **Run connectomes as agents.**
 
-FastConnectome provides a small, typed boundary between an environment and a
-stateful connectome simulation. Models, dynamics, sensory encoding, action
-decoding, reinforcement, and execution backends remain explicit so making a
-demo convenient does not silently change its scientific assumptions.
+FastConnectome is an experimental Python library for running a connectome as a
+stateful agent. It keeps sensory encoding, neural dynamics, action decoding,
+reinforcement, and execution backends separate so each assumption can be
+inspected or replaced.
 
-The initial release includes two experimental presets over the complete MaleCNS
-v1.0 graph: visual turning from RGB frames and a controlled KC→MBON conditioning
-task. Both use Stonkfly dynamics and candidate dopamine-gated plasticity. Apple
-hosts use Metal propagation by default when a Metal device and Swift toolchain
-are available; other hosts use the native CPU kernel.
+The first supported model runs the complete MaleCNS v1.0 graph: 166,700
+neurons, 25,582,938 directed edges, and 124,177,617 synaptic contacts. The
+simulator does not prune the graph for faster examples.
 
-## Install and prepare MaleCNS
+> [!IMPORTANT]
+> FastConnectome is research software. MaleCNS supplies anatomy, not measured
+> dynamics for every neuron or a validated learning rule. The included
+> `stonkfly-v1` dynamics and KC→MBON plasticity are modeling assumptions.
 
-Python 3.11 and a C++17 compiler are required. The Metal backend additionally
-requires the Swift compiler supplied by Apple developer tools. The optional
-MaleCNS preparation downloads roughly 1.1 GB and uses several additional GB
-for derived data.
+## Try the dog conditioning demo
+
+The shortest useful demo pairs a synthetic dog cue with positive reinforcement,
+then tests a new dog drawing and a cat control. It opens an animation of the
+pixel detector, Kenyon cells, changing KC→MBON connections, MBON07 activity, and
+the resulting approach or avoidance response.
+
+![Dog conditioning animation showing the fixed vision adapter, KC to MBON plasticity, and an approach response](docs/images/dog-conditioning.png)
+
+Python 3.11 and a C++17 compiler are required. On macOS, the Metal backend also
+requires the Swift compiler supplied by Apple developer tools.
 
 ```sh
 uv sync --all-extras
-uv run fastconnectome prepare malecns-v1
+uv run fastconnectome prepare malecns-v1 --data-dir data
+uv run python examples/learn_dogs.py --data-dir data
 ```
 
-## Beginner KC→MBON learning
+Preparing MaleCNS downloads about 1.1 GB and needs several additional GB while
+building the graph. If you prepared it elsewhere, pass that directory to
+`--data-dir`. It must contain `graph.npz` and `annotations.feather`.
 
-The conditioning preset hides direct neural currents behind two declared cues:
+A typical run produces this behavior:
+
+```text
+before training   dog cue   212 MBON07 spikes   avoid
+after training    dog cue   506 MBON07 spikes   approach
+control           cat cue   443 MBON07 spikes   avoid
+```
+
+The values vary slightly between CPU and Metal. The fixed decision boundary is
+480 MBON07 spikes.
+
+The dog demo separates image recognition from associative learning:
+
+| Part | What it does |
+| --- | --- |
+| `TemplateDogVision` | Compares synthetic foreground pixels with fixed dog and cat templates. |
+| `KCCue.A` / `KCCue.B` | Routes the detector result to `KCab-m` or `KCab-s`. |
+| `DopamineValence` | Converts positive reward into a PAM11 current pulse. |
+| KC→MBON plasticity | Changes existing synapses while the dog cue and PAM11 are active. |
+| `MBONApproach` | Applies the fixed 480-spike approach threshold. |
+
+Dog classification comes from the fixed template matcher. KC→MBON plasticity
+learns the value of its output cue. The connectome does not learn visual
+features or recognize photographs of dogs.
+
+Use `--no-animation` for terminal output:
+
+```sh
+uv run python examples/learn_dogs.py --no-animation --data-dir data
+```
+
+## Python quickstart
+
+The same conditioning experiment fits in one agent loop:
 
 ```python
 from fastconnectome import Agent, KCCue
 
-with Agent.from_preset("malecns-kc-conditioning") as fly:
+with Agent.from_preset(
+    "malecns-kc-conditioning",
+    data_dir="data",
+) as fly:
     for _ in range(20):
         fly.reset(keep_learning=True)
-        result = fly.step(KCCue.A, reward=1.0)
+        fly.step(KCCue.A, reward=1.0)
 
     fly.export_policy("models/conditioned.fcmodel")
 
 with Agent.load_policy(
     "models/conditioned.fcmodel",
+    data_dir="data",
     preset="malecns-kc-conditioning",
 ) as deployed:
-    learned_response = deployed.step(KCCue.A)
+    dog_response = deployed.step(KCCue.A)
+    deployed.reset()
+    control_response = deployed.step(KCCue.B)
+
+print(dog_response.action)      # approach
+print(control_response.action)  # avoid
 ```
 
-`KCCue.A` directly stimulates the `KCab-m` population; `KCCue.B` stimulates
-`KCab-s`. Positive reward stimulates PAM11 while those KCs are active, changing
-only existing KC→MBON connections. The loaded policy is frozen. Run the complete
-baseline, training, deployment, and unpaired-cue example with:
+`reset(keep_learning=True)` clears neural activity and short-lived state between
+trials while retaining learned weights. `load_policy()` creates a fresh
+simulator with plasticity disabled.
 
-```sh
-uv run python examples/quickstart_kc_mbon.py --data-dir data
-```
+The default reinforcement adapter uses reward sign, not magnitude. A positive
+value above the deadband stimulates PAM11, a negative value stimulates PPL101,
+and zero schedules no pulse.
 
-This is a controlled neural-stimulation task, not natural sensory conditioning.
+## Presets
 
-For an animated version, a tiny fixed template matcher turns synthetic dog and
-cat images into those two cues before the same KC→MBON training loop:
+| Preset | Observation | Action | Neural time per step | Readout |
+| --- | --- | --- | ---: | --- |
+| `malecns-kc-conditioning` | `KCCue` | `approach` / `avoid` | 1,000 ms | MBON07 spike count |
+| `malecns-visual-turning` | RGB `uint8` frame | `left` / `right` / `hold` | 20 ms | DNp20 activity over 200 ms |
 
-```sh
-uv run python examples/learn_dogs.py --data-dir data
-```
+Both presets use MaleCNS v1.0, `stonkfly-v1` dynamics, and the same candidate
+dopamine-gated KC→MBON rule. `backend="auto"` selects Metal when available and
+uses CPU otherwise.
 
-If MaleCNS was prepared somewhere else, pass that directory instead. It must
-contain `graph.npz` and `annotations.feather`.
-
-The animation labels the boundary explicitly: the pixel adapter recognizes the
-simple drawings, while the simulated mushroom body learns that the dog cue has
-positive value. It does not claim that KC→MBON plasticity learned real-world dog
-recognition. Pass `--no-animation` to run the experiment in a terminal.
-
-## Minimal agent loop
+The visual turning preset follows an environment loop:
 
 ```python
 from fastconnectome import Agent
 
-fly = Agent.from_preset("malecns-visual-turning")
-reward = 0.0
+with Agent.from_preset(
+    "malecns-visual-turning",
+    data_dir="data",
+) as fly:
+    frame = environment.reset()
+    reward = 0.0
 
-while running:
-    result = fly.step(frame, reward=reward)
-    transition = environment.step(result.action)
-    frame = transition.observation
-    reward = transition.reward
+    while running:
+        result = fly.step(frame, reward=reward)
+        transition = environment.step(result.action)
+        frame = transition.observation
+        reward = transition.reward
 ```
 
-`reward` describes the outcome of the previous action. Positive values schedule
-a PAM11 pulse, negative values schedule a PPL101 pulse, and zero schedules
-nothing. The preset advances 20 ms of neural time per call and decodes DNp20
-activity over a rolling 200 ms window.
+Here, `reward` describes the outcome of the previous action. The runner passes
+that reward into the next neural step.
 
 ## Compose an agent
+
+Presets are ordinary `Agent` instances. Build one from individual components
+when you need different populations, timing, or adapters:
 
 ```python
 from fastconnectome import Agent
@@ -121,28 +172,37 @@ fly = Agent(
 )
 ```
 
-The public roles are deliberately separate:
+The four public roles have narrow interfaces:
 
-```text
-ObservationEncoder: environment observation -> simulator stimulus
-Simulator:          stimulus + reinforcement -> neural activity
-ActionDecoder:      neural activity -> environment action
-Reinforcement:      numeric reward -> simulator reinforcement
-```
+| Role | Contract |
+| --- | --- |
+| `ObservationEncoder` | Environment observation → simulator stimulus |
+| `Simulator` | Stimulus and reinforcement → neural activity |
+| `ActionDecoder` | Neural activity → environment action |
+| `ReinforcementEncoder` | Numeric reward → simulator reinforcement |
 
-## Lifecycle
+Connectome dynamics belong to the simulator. Device-specific execution belongs
+to the backend. Selecting Metal does not select a different neural model.
+
+## Checkpoints and policies
+
+FastConnectome keeps resumable training state separate from deployable learned
+weights.
+
+| Artifact | Contents | Use |
+| --- | --- | --- |
+| `.fccheckpoint` | Neural state, plasticity traces, pending dopamine, learned weights, and decoder history | Resume the same training process |
+| `.fcmodel` | Learned KC→MBON weight overlay and configuration manifest | Load a fresh frozen policy |
+
+Save or restore one agent:
 
 ```python
 fly.save("runs/agent.fccheckpoint")
 fly.restore("runs/agent.fccheckpoint")
-
-fly.reset()                    # training agent: reset state and learned weights
-fly.reset(keep_learning=True)  # training agent: retain learned weights
 ```
 
-An agent checkpoint contains neural state, plasticity traces, pending dopamine
-pulse, learned weights, and decoder history. For exact synchronous training
-continuation, checkpoint the environment and pending reward as well:
+For exact synchronous replay, checkpoint the environment and pending reward as
+part of a `TrainingSession`:
 
 ```python
 from fastconnectome import TrainingSession
@@ -153,143 +213,129 @@ session.save_checkpoint("runs/training.fccheckpoint")
 session.restore_checkpoint("runs/training.fccheckpoint")
 ```
 
-The environment implements `save()` and `restore()` to preserve its own state
-and random generator. Real-time sessions intentionally are not claimed to resume
-exactly because thread scheduling can change which observations are superseded.
+An `.fcmodel` excludes the 25-million-edge baseline graph, so KC→MBON policies
+are usually tens of KiB. Loading one validates its model, dynamics, and adapter
+configuration. Resetting a deployed agent keeps the learned overlay.
 
-## Train and deploy
-
-A deployment policy is a learned-weight overlay, not a paused experiment:
-
-```python
-fly.export_policy("models/pong.fcmodel")
-
-deployed = Agent.load_policy(
-    "models/pong.fcmodel",
-    data_dir="data",
-)
-```
-
-Loading validates the model graph, dynamics, and adapter configuration; applies
-the learned KC→MBON weights to a fresh connectome; clears transient state; and
-freezes plasticity. The baseline graph remains in the model cache, so the policy
-artifact is only tens of KiB. Resetting a deployed agent retains its policy.
-
-The headless Pong showcase evaluates a frozen baseline, trains synchronously,
-verifies exact checkpoint replay, exports a policy, loads a fresh frozen agent,
-and evaluates it on the same scenario. Defaults finish in roughly two minutes
-on the reference machine:
-
-```sh
-uv run python examples/train_pong.py --data-dir data
-```
-
-It reports both behavioral scores and changed synapses. A single improved run is
-not presented as evidence of learning; repeat evaluation over held-out seeds is
-still required.
-
-For a deliberately easier mechanism check, dense tracking reward gives `+1`
-when the paddle and ball centers are within 26 horizontal pixels and `-1`
-otherwise:
-
-```sh
-uv run python examples/train_pong.py --data-dir data --reward tracking
-```
-
-This assay makes reward frequent and reports aligned steps, but it still keeps
-behavioral score and changed synapses separate.
-
-### Full conditioning controls
-
-For counterbalanced, no-reward, frozen-plasticity, and memory-erasure controls,
-run:
-
-```sh
-uv run python examples/learn_kc_mbon.py --data-dir data
-```
-
-This pairs direct stimulation of one declared KC population with PAM11, then
-loads the learned KC→MBON overlay into a fresh frozen simulator. A fixed MBON07
-threshold changes from `avoid` to `approach` only for the paired cue. A
-counterbalanced arm pairs the other KC population and reverses which cue elicits
-`approach`. The example also checks no-reward training, frozen plasticity, and
-memory erasure. Direct population current is an explicit controlled-stimulation
-assay—not a claim that the present RGB pathway supports natural conditioning.
-
-### Learned-readout positive control
-
-`train_pong.py` deliberately tests the unvalidated KC→MBON plasticity pathway;
-it can change synapses without improving Pong. For a smaller positive control,
-train an action-aware linear readout on frozen full-connectome activity:
-
-```sh
-uv run python examples/learn_pong_readout.py --data-dir data
-```
-
-The example presents a ball at training positions on either side of a fixed
-paddle, runs every image through the complete MaleCNS graph, and rewards the
-sampled `left` or `right` action. It evaluates unseen ball positions, saves the
-readout, loads it fresh, and repeats evaluation. This demonstrates ordinary
-reward-based policy learning from connectome features. It does **not** claim
-that the connectome's KC→MBON synapses learned the task; those remain frozen.
+Policies can move between CPU and Metal because both backends run
+`stonkfly-v1`. Exact training checkpoints are backend-specific.
 
 ## Runners
 
-`run_episode` is synchronous and deterministic. `RealtimeRunner` advances an
-environment at its own frequency, gives the agent the latest observation, holds
-the latest action while computation continues, and queues nonzero reward events.
+`run_episode()` advances the environment and agent synchronously.
+`TrainingSession` adds the environment state, pending reward, and exact replay
+checkpoint. `RealtimeRunner` runs the environment at its own frequency, holds
+the latest decoded action while neural computation continues, and queues
+nonzero rewards.
 
-The Pong example uses the real-time runner at 60 FPS:
+The real-time Pong example runs its environment at 60 FPS:
 
 ```sh
-uv run python examples/pong.py --steps 1200
+uv run python examples/pong.py --data-dir data --steps 1200
 ```
 
-## Timing terminology
+Real-time sessions do not promise exact replay because thread scheduling can
+change which observations the agent sees.
 
-- `neural_ms`: simulated neural time advanced by each agent call.
-- `window_ms`: neural activity history used by an action decoder.
-- `duration_ms`: simulated duration of a reinforcement pulse.
-- Environment frequency is independent and belongs to a runner.
+## Examples
 
-None of these values represent guaranteed wall-clock latency.
+| Command | Purpose |
+| --- | --- |
+| `uv run python examples/learn_dogs.py --data-dir data` | Animated synthetic dog conditioning |
+| `uv run python examples/quickstart_kc_mbon.py --data-dir data` | Smallest preset, policy export, and frozen reload |
+| `uv run python examples/learn_kc_mbon.py --data-dir data` | Counterbalanced cue, no-reward, frozen-plasticity, and memory-erasure controls |
+| `uv run python examples/train_pong.py --data-dir data` | Native KC→MBON Pong experiment with exact checkpoint replay |
+| `uv run python examples/learn_pong_readout.py --data-dir data` | External learned-readout positive control over frozen connectome activity |
+| `uv run python examples/pong.py --data-dir data --steps 1200` | Real-time visual turning without a learned readout |
 
-## Fidelity and backends
+The native Pong experiment changes thousands of KC→MBON connections but has not
+improved held-out behavior. The learned-readout example succeeds because its
+external policy receives action-specific credit; the connectome remains frozen.
+These examples report behavior separately from changed synapses.
 
-Dynamics and execution backends are separate identifiers:
+## Backends and numerical fidelity
+
+Choose a backend without changing dynamics:
 
 ```python
-Agent.from_preset(
+fly = Agent.from_preset(
     "malecns-visual-turning",
+    data_dir="data",
     dynamics="stonkfly-v1",
-    backend="cpu",  # Override the default automatic selection.
+    backend="cpu",
 )
 ```
 
-The default `backend="auto"` selects Metal on a compatible Apple host and CPU
-elsewhere. Set `backend="cpu"` or `backend="metal"` to require one explicitly.
-Metal accelerates spike propagation while the existing double-precision rate
-traces and plasticity rule remain on CPU. Policies can cross these backends
-because both identify the same `stonkfly-v1` dynamics; exact training
-checkpoints remain backend-specific.
+| Backend | Support | Implementation |
+| --- | --- | --- |
+| `cpu` | Python 3.11 host with a C++17 compiler | Stonkfly native CPU kernel |
+| `metal` | macOS, Metal device, and Apple developer tools | Metal spike propagation with NumPy plasticity state |
+| `auto` | Default | Metal when available, CPU otherwise |
 
-Metal and CPU use different parallel floating-point accumulation orders. The
-current fixed-input and reinforcement conformance corpora produce matching
-spike readouts and tightly bounded neural-state differences; sufficiently long
-or changing trajectories may diverge at individual spike thresholds. Backend
-results are therefore not promised to be bit-identical. A coarser or pruned
-model must use another dynamics identifier rather than hiding the change behind
-a `fast=True` option.
+The Metal backend propagates spikes on the GPU. Double-precision rate,
+eligibility, memory, and plasticity updates remain in NumPy. CPU and Metal use
+different floating-point accumulation orders, so long trajectories may cross
+individual spike thresholds at different times. The conformance tests require
+matching readouts and bounded state differences, not bit-identical execution.
 
-## Scientific status
+`neural_ms`, decoder `window_ms`, and reinforcement `duration_ms` all refer to
+simulated time. None of them promises wall-clock latency.
 
-This is a wiring-constrained simulation, not a complete biological fly. The
-retinal projection, neuron equations, transmitter signs, reward assignment,
-motor decoder, and plasticity rule include explicit engineering assumptions.
-Changing weights does not by itself demonstrate learned behavior.
+## Scientific scope
 
-The MaleCNS implementation is currently provided by
-[nftechie/stonkfly](https://github.com/nftechie/stonkfly) at commit
-`78ef3e05ab0fa086032098558d893667068944a0`. Stonkfly's DOOMFLY-derived neural
-code is MIT licensed. MaleCNS data is downloaded separately under its upstream
-CC BY 4.0 terms.
+FastConnectome constrains simulation and plasticity to the published wiring, but
+the wiring diagram does not specify a complete fly model. Current assumptions
+include:
+
+- DOOMFLY-derived neuron and synapse equations from Stonkfly
+- engineered retinal projection and direct KC population cues
+- inferred transmitter signs
+- fixed PAM11 and PPL101 reinforcement currents
+- a centered, dopamine-gated KC→MBON plasticity rule
+- DNp20 and MBON07 action decoders chosen for these experiments
+
+The full control suite in `learn_kc_mbon.py` checks cue-specific behavior after
+training, retention in a fresh frozen simulator, loss after memory erasure, and
+counterbalanced cues. Direct KC current makes these mechanism assays. They do
+not establish natural sensory conditioning or embodied motor learning.
+
+Endogenous modeled dopamine can change weights without imposed reward. The
+no-reward control in `learn_kc_mbon.py` measures that drift and checks that it
+does not cross the fixed behavioral threshold. Synaptic change alone is not
+counted as behavioral learning.
+
+A coarser graph, pruned graph, or changed equation set should use a different
+dynamics identifier. FastConnectome does not hide those changes behind a speed
+flag.
+
+## Data and attribution
+
+- [MaleCNS v1.0](https://male-cns.janelia.org/) provides the connectome under CC
+  BY 4.0 terms. FastConnectome downloads the data separately.
+- [nftechie/stonkfly](https://github.com/nftechie/stonkfly) provides the current
+  MaleCNS loader and CPU dynamics. FastConnectome pins commit
+  `78ef3e05ab0fa086032098558d893667068944a0`.
+- Stonkfly's DOOMFLY-derived neural code is MIT licensed.
+
+## Development
+
+```sh
+uv sync --all-extras
+uv run pytest -q
+uv run ty check
+uv build
+```
+
+Tests that execute the prepared MaleCNS graph use
+`FASTCONNECTOME_MALECNS_DATA`. Metal tests also require a compatible macOS host:
+
+```sh
+FASTCONNECTOME_MALECNS_DATA=/path/to/data uv run pytest tests/test_metal_malecns.py -q
+```
+
+## License
+
+This repository does not yet include a license for FastConnectome's own source
+code. Until one is added, the code is not available under an open-source
+license. Upstream Stonkfly code and MaleCNS data retain their own terms described
+above.
