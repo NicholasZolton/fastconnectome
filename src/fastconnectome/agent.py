@@ -159,7 +159,7 @@ class Agent(Generic[ObservationT, StimulusT, ReinforcementT, ActivityT, ActionT]
         *,
         data_dir: str | Path = Path("data"),
         dynamics: str = "stonkfly-v1",
-        backend: str = "cpu",
+        backend: str = "auto",
         learning: bool = True,
     ) -> Agent[
         NDArray[uint8],
@@ -184,7 +184,7 @@ class Agent(Generic[ObservationT, StimulusT, ReinforcementT, ActivityT, ActionT]
         path: str | Path,
         *,
         data_dir: str | Path = Path("data"),
-        backend: str = "cpu",
+        backend: str = "auto",
     ) -> Agent[
         NDArray[uint8],
         NDArray[uint8],

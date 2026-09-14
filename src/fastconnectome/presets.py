@@ -13,11 +13,27 @@ from fastconnectome.models.malecns import (
     CurrentPulse,
     DopamineValence,
     MaleCNS,
+    MetalMaleCNS,
     NeuralActivity,
     Turn,
 )
+from fastconnectome.models.malecns.metal import metal_available
 
 RGBFrame = NDArray[np.uint8]
+
+
+def resolve_backend(backend: str) -> str:
+    """Resolve automatic execution without changing the requested dynamics."""
+
+    if backend == "auto":
+        return "metal" if metal_available() else "cpu"
+    if backend == "metal":
+        if not metal_available():
+            raise RuntimeError("The Metal backend is unavailable on this host")
+        return backend
+    if backend != "cpu":
+        raise ValueError(f"Unsupported backend {backend!r}")
+    return backend
 
 
 def build_preset(
@@ -32,10 +48,10 @@ def build_preset(
         raise ValueError(f"Unknown preset {name!r}")
     if dynamics != "stonkfly-v1":
         raise ValueError(f"Unsupported dynamics {dynamics!r}")
-    if backend != "cpu":
-        raise ValueError(f"Unsupported backend {backend!r}")
+    selected_backend = resolve_backend(backend)
+    simulator_type = MetalMaleCNS if selected_backend == "metal" else MaleCNS
     return Agent(
-        simulator=MaleCNS(data_dir, learning=learning),
+        simulator=simulator_type(data_dir, learning=learning),
         observation=CompoundEye(),
         action=BilateralTurn(),
         reinforcement=DopamineValence(),
@@ -52,14 +68,13 @@ def load_policy(
     manifest = read_npz_manifest(path)
     if manifest.get("schema") != 1 or manifest.get("kind") != "fastconnectome-policy":
         raise ValueError("Unsupported FastConnectome policy artifact")
-    if backend != "cpu":
-        raise ValueError(f"Unsupported backend {backend!r}")
+    selected_backend = resolve_backend(backend)
     model = object_dict(manifest.get("model"), "model")
     if (
         model.get("model") != "malecns"
         or model.get("release") != "v1.0"
         or model.get("dynamics") != "stonkfly-v1"
-        or model.get("backend") != backend
+        or model.get("backend") not in {"cpu", "metal"}
     ):
         raise ValueError("Unsupported policy model or backend")
 
@@ -119,7 +134,8 @@ def load_policy(
         ),
     )
 
-    simulator = MaleCNS(
+    simulator_type = MetalMaleCNS if selected_backend == "metal" else MaleCNS
+    simulator = simulator_type(
         data_dir,
         learning=False,
         neural_bin_ms=neural_bin_ms,

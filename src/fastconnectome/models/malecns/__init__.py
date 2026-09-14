@@ -12,6 +12,7 @@ from fastconnectome.models.malecns.simulator import (
     NeuralActivity,
     PopulationIndex,
 )
+from fastconnectome.models.malecns.metal_simulator import MetalMaleCNS
 
 __all__ = [
     "BilateralTurn",
@@ -19,6 +20,7 @@ __all__ = [
     "CurrentPulse",
     "DopamineValence",
     "MaleCNS",
+    "MetalMaleCNS",
     "NeuralActivity",
     "PopulationIndex",
     "Turn",

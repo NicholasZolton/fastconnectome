@@ -8,13 +8,17 @@ decoding, reinforcement, and execution backends remain explicit so making a
 demo convenient does not silently change its scientific assumptions.
 
 The initial release includes one experimental preset: the complete MaleCNS
-v1.0 graph using Stonkfly's CPU dynamics, RGB retinal adapter, bilateral DNp20
-turning readout, and candidate dopamine-gated plasticity.
+v1.0 graph using Stonkfly dynamics, an RGB retinal adapter, bilateral DNp20
+turning readout, and candidate dopamine-gated plasticity. Apple hosts use Metal
+propagation by default when a Metal device and Swift toolchain are available;
+other hosts use the native CPU kernel.
 
 ## Install and prepare MaleCNS
 
-Python 3.11 and a C++17 compiler are required. The optional MaleCNS preparation
-downloads roughly 1.1 GB and uses several additional GB for derived data.
+Python 3.11 and a C++17 compiler are required. The Metal backend additionally
+requires the Swift compiler supplied by Apple developer tools. The optional
+MaleCNS preparation downloads roughly 1.1 GB and uses several additional GB
+for derived data.
 
 ```sh
 uv sync --all-extras
@@ -166,13 +170,24 @@ Dynamics and execution backends are separate identifiers:
 Agent.from_preset(
     "malecns-visual-turning",
     dynamics="stonkfly-v1",
-    backend="cpu",
+    backend="cpu",  # Override the default automatic selection.
 )
 ```
 
-A future Metal implementation of the same equations would use another backend.
-A coarser or pruned interactive model must use another dynamics identifier rather
-than hiding the change behind a `fast=True` option.
+The default `backend="auto"` selects Metal on a compatible Apple host and CPU
+elsewhere. Set `backend="cpu"` or `backend="metal"` to require one explicitly.
+Metal accelerates spike propagation while the existing double-precision rate
+traces and plasticity rule remain on CPU. Policies can cross these backends
+because both identify the same `stonkfly-v1` dynamics; exact training
+checkpoints remain backend-specific.
+
+Metal and CPU use different parallel floating-point accumulation orders. The
+current fixed-input and reinforcement conformance corpora produce matching
+spike readouts and tightly bounded neural-state differences; sufficiently long
+or changing trajectories may diverge at individual spike thresholds. Backend
+results are therefore not promised to be bit-identical. A coarser or pruned
+model must use another dynamics identifier rather than hiding the change behind
+a `fast=True` option.
 
 ## Scientific status
 

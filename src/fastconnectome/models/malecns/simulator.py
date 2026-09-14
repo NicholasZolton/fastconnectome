@@ -1,12 +1,13 @@
 """Reference MaleCNS simulator backed by Stonkfly's native CPU kernel."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 import hashlib
 import json
 import os
 from pathlib import Path
 import tempfile
-from typing import TYPE_CHECKING
+from typing import Any
 import zipfile
 
 import numpy as np
@@ -19,9 +20,6 @@ from fastconnectome.types import (
     SimulationResult,
     Timing,
 )
-
-if TYPE_CHECKING:
-    from stonkfly.neural.visual import VisualMemoryBrain
 
 RGBFrame = NDArray[np.uint8]
 
@@ -88,7 +86,9 @@ class MaleCNS:
         if DATA != self.data_dir:
             raise RuntimeError("Stonkfly was imported with another data directory")
 
-        self._brain: VisualMemoryBrain = VisualMemoryBrain(
+        # Stonkfly is an optional, untyped runtime dependency whose arrays are
+        # validated immediately below and by its own constructor.
+        self._brain: Any = VisualMemoryBrain(
             path=self.data_dir / "graph.npz"
         )
         self._brain.weights_frozen = not learning
@@ -168,11 +168,10 @@ class MaleCNS:
             if self._pending_pulse is not None and self._pulse_remaining_ms > 0:
                 interval_ms = min(interval_ms, self._pulse_remaining_ms)
                 stimulation = (self._pulse_indices, self._pending_pulse.current)
-            current_counts, elapsed = self._brain.rgb_step(
+            current_counts, elapsed = self._rgb_step(
                 stimulus,
                 interval_ms,
-                learning=self.learning,
-                stimulation=stimulation,
+                stimulation,
             )
             counts += current_counts
             compute_seconds += elapsed
@@ -203,6 +202,19 @@ class MaleCNS:
                 "reinforcement": applied_label,
                 "pulse_remaining_ms": self._pulse_remaining_ms,
             },
+        )
+
+    def _rgb_step(
+        self,
+        stimulus: RGBFrame,
+        duration_ms: float,
+        stimulation: tuple[NDArray[np.int32], float] | None,
+    ) -> tuple[NDArray[np.int32], float]:
+        return self._brain.rgb_step(
+            stimulus,
+            duration_ms,
+            learning=self.learning,
+            stimulation=stimulation,
         )
 
     def reset(self, *, keep_learning: bool = False) -> None:
@@ -328,7 +340,10 @@ class MaleCNS:
             for key, value in raw.items()
             if key not in {"policy", "provenance"}
         }
-        if stored_manifest != manifest or raw.get("provenance") != self._provenance():
+        if (
+            not self._policy_manifest_matches(stored_manifest, manifest)
+            or raw.get("provenance") != self._provenance()
+        ):
             raise ValueError("Policy provenance or configuration mismatch")
         expected_edges = self._plastic_edges
         policy = raw.get("policy")
@@ -362,6 +377,24 @@ class MaleCNS:
         self._pending_pulse = None
         self._pulse_remaining_ms = 0.0
         self._pulse_indices = np.array([], dtype=np.int32)
+
+    @staticmethod
+    def _policy_manifest_matches(
+        stored: Mapping[str, object], expected: Mapping[str, object]
+    ) -> bool:
+        stored_copy = dict(stored)
+        expected_copy = dict(expected)
+        stored_model = stored_copy.get("model")
+        expected_model = expected_copy.get("model")
+        if not isinstance(stored_model, dict) or not isinstance(expected_model, dict):
+            return False
+        stored_model_copy = dict(stored_model)
+        expected_model_copy = dict(expected_model)
+        stored_model_copy.pop("backend", None)
+        expected_model_copy.pop("backend", None)
+        stored_copy["model"] = stored_model_copy
+        expected_copy["model"] = expected_model_copy
+        return stored_copy == expected_copy
 
     def _provenance(self) -> dict[str, object]:
         return {
