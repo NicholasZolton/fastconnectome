@@ -75,6 +75,11 @@ class PolicyArtifact(Protocol):
     def import_policy(self, path: Path, manifest: dict[str, object]) -> None: ...
 
 
+@runtime_checkable
+class Closable(Protocol):
+    def close(self) -> None: ...
+
+
 class Environment(Protocol[EnvironmentObservationT, ActionT_contra]):
     def reset(self) -> EnvironmentObservationT: ...
 

@@ -9,7 +9,12 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
-from fastconnectome.models.malecns.simulator import CurrentPulse, NeuralActivity
+from fastconnectome.models.malecns.simulator import (
+    CurrentPulse,
+    MaleCNSStimulus,
+    NeuralActivity,
+    PopulationCurrent,
+)
 from fastconnectome.types import DecodedAction
 
 RGBFrame = NDArray[np.uint8]
@@ -19,6 +24,40 @@ class Turn(StrEnum):
     LEFT = "left"
     RIGHT = "right"
     HOLD = "hold"
+
+
+class KCCue(StrEnum):
+    """Two declared Kenyon-cell populations used as conditioning cues."""
+
+    A = "KCab-m"
+    B = "KCab-s"
+
+
+class ApproachChoice(StrEnum):
+    APPROACH = "approach"
+    AVOID = "avoid"
+
+
+@dataclass(frozen=True, slots=True)
+class KCCueEncoder:
+    """Turn a named experimental cue into direct Kenyon-cell stimulation."""
+
+    current: float = 40.0
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.current) or self.current <= 0:
+            raise ValueError("KC cue current must be finite and positive")
+
+    def encode(self, observation: KCCue) -> MaleCNSStimulus:
+        if not isinstance(observation, KCCue):
+            raise TypeError("KCCueEncoder requires a KCCue")
+        return MaleCNSStimulus(
+            np.zeros((180, 320, 3), dtype=np.uint8),
+            (PopulationCurrent(observation.value, self.current),),
+        )
+
+    def configuration(self) -> dict[str, str | float]:
+        return {"type": "kc-cue-v1", "current": self.current}
 
 
 class CompoundEye:
@@ -219,3 +258,56 @@ class BilateralTurn:
             raise ValueError("Bilateral decoder duration mismatch")
         self._samples = restored
         self._sample_ms = sample_ms
+
+
+@dataclass(frozen=True, slots=True)
+class MBONApproach:
+    """Decode MBON07 activity with the fixed controlled-assay threshold."""
+
+    cell_type: str = "MBON07"
+    threshold_spikes: int = 480
+
+    def __post_init__(self) -> None:
+        if not self.cell_type or self.threshold_spikes <= 0:
+            raise ValueError("Invalid MBON approach decoder configuration")
+
+    def decode(
+        self, activity: NeuralActivity, duration_ms: float
+    ) -> DecodedAction[ApproachChoice]:
+        if duration_ms <= 0:
+            raise ValueError("duration_ms must be positive")
+        indices = activity.populations.select(self.cell_type)
+        if not len(indices):
+            raise ValueError(f"Missing {self.cell_type} population")
+        spikes = int(activity.counts[indices].sum())
+        choice = (
+            ApproachChoice.APPROACH
+            if spikes >= self.threshold_spikes
+            else ApproachChoice.AVOID
+        )
+        return DecodedAction(
+            choice,
+            {
+                "mbon_spikes": spikes,
+                "approach_threshold_spikes": self.threshold_spikes,
+            },
+        )
+
+    def reset(self) -> None:
+        pass
+
+    def configuration(self) -> dict[str, str | int]:
+        return {
+            "type": "mbon-approach-v1",
+            "cell_type": self.cell_type,
+            "threshold_spikes": self.threshold_spikes,
+        }
+
+    def save(self, path: Path) -> None:
+        with path.open("wb") as handle:
+            np.savez_compressed(handle, schema=np.asarray(1, dtype=np.int64))
+
+    def restore(self, path: Path) -> None:
+        with np.load(path, allow_pickle=False) as archive:
+            if set(archive.files) != {"schema"} or int(archive["schema"]) != 1:
+                raise ValueError("Invalid MBON approach decoder checkpoint")

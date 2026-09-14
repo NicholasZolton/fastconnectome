@@ -1,6 +1,7 @@
 """FastConnectome public API."""
 
 from fastconnectome.agent import Agent
+from fastconnectome.models.malecns import ApproachChoice, KCCue
 from fastconnectome.runtime import RealtimeRunner, run_episode
 from fastconnectome.training import TrainingSession
 from fastconnectome.types import (
@@ -17,8 +18,10 @@ from fastconnectome.types import (
 __all__ = [
     "ActivitySummary",
     "Agent",
+    "ApproachChoice",
     "EnvironmentStep",
     "LearningSummary",
+    "KCCue",
     "ModelInfo",
     "RealtimeRunner",
     "RunResult",

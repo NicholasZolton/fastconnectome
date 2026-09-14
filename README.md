@@ -7,11 +7,11 @@ stateful connectome simulation. Models, dynamics, sensory encoding, action
 decoding, reinforcement, and execution backends remain explicit so making a
 demo convenient does not silently change its scientific assumptions.
 
-The initial release includes one experimental preset: the complete MaleCNS
-v1.0 graph using Stonkfly dynamics, an RGB retinal adapter, bilateral DNp20
-turning readout, and candidate dopamine-gated plasticity. Apple hosts use Metal
-propagation by default when a Metal device and Swift toolchain are available;
-other hosts use the native CPU kernel.
+The initial release includes two experimental presets over the complete MaleCNS
+v1.0 graph: visual turning from RGB frames and a controlled KC→MBON conditioning
+task. Both use Stonkfly dynamics and candidate dopamine-gated plasticity. Apple
+hosts use Metal propagation by default when a Metal device and Swift toolchain
+are available; other hosts use the native CPU kernel.
 
 ## Install and prepare MaleCNS
 
@@ -24,6 +24,38 @@ for derived data.
 uv sync --all-extras
 uv run fastconnectome prepare malecns-v1
 ```
+
+## Beginner KC→MBON learning
+
+The conditioning preset hides direct neural currents behind two declared cues:
+
+```python
+from fastconnectome import Agent, KCCue
+
+with Agent.from_preset("malecns-kc-conditioning") as fly:
+    for _ in range(20):
+        fly.reset(keep_learning=True)
+        result = fly.step(KCCue.A, reward=1.0)
+
+    fly.export_policy("models/conditioned.fcmodel")
+
+with Agent.load_policy(
+    "models/conditioned.fcmodel",
+    preset="malecns-kc-conditioning",
+) as deployed:
+    learned_response = deployed.step(KCCue.A)
+```
+
+`KCCue.A` directly stimulates the `KCab-m` population; `KCCue.B` stimulates
+`KCab-s`. Positive reward stimulates PAM11 while those KCs are active, changing
+only existing KC→MBON connections. The loaded policy is frozen. Run the complete
+baseline, training, deployment, and unpaired-cue example with:
+
+```sh
+uv run python examples/quickstart_kc_mbon.py --data-dir data
+```
+
+This is a controlled neural-stimulation task, not natural sensory conditioning.
 
 ## Minimal agent loop
 
@@ -152,10 +184,10 @@ uv run python examples/train_pong.py --data-dir data --reward tracking
 This assay makes reward frequent and reports aligned steps, but it still keeps
 behavioral score and changed synapses separate.
 
-### A learning example that passes
+### Full conditioning controls
 
-For a controlled test in which learning occurs only on the existing KC→MBON
-connections, run:
+For counterbalanced, no-reward, frozen-plasticity, and memory-erasure controls,
+run:
 
 ```sh
 uv run python examples/learn_kc_mbon.py --data-dir data

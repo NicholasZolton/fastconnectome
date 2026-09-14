@@ -8,12 +8,14 @@ import os
 from pathlib import Path
 import tempfile
 from time import perf_counter
-from typing import Generic, TYPE_CHECKING, TypeVar
+from types import TracebackType
+from typing import Generic, Literal, overload, TYPE_CHECKING, TypeVar
 import zipfile
 
 from fastconnectome.protocols import (
     ActionDecoder,
     Checkpointable,
+    Closable,
     Configurable,
     ObservationEncoder,
     PolicyArtifact,
@@ -26,8 +28,14 @@ if TYPE_CHECKING:
     from numpy import uint8
     from numpy.typing import NDArray
 
-    from fastconnectome.models.malecns import CurrentPulse, NeuralActivity
-    from fastconnectome.models.malecns.adapters import Turn
+    from fastconnectome.models.malecns import (
+        ApproachChoice,
+        CurrentPulse,
+        KCCue,
+        MaleCNSStimulus,
+        NeuralActivity,
+        Turn,
+    )
 
 ObservationT = TypeVar("ObservationT")
 StimulusT = TypeVar("StimulusT")
@@ -78,6 +86,29 @@ class Agent(Generic[ObservationT, StimulusT, ReinforcementT, ActivityT, ActionT]
     def reset(self, *, keep_learning: bool = False) -> None:
         self._simulator.reset(keep_learning=keep_learning)
         self._action.reset()
+
+    def close(self) -> None:
+        """Release resources held by execution backends such as Metal."""
+
+        if isinstance(self._simulator, Closable):
+            self._simulator.close()
+
+    def __enter__(self) -> Agent[
+        ObservationT,
+        StimulusT,
+        ReinforcementT,
+        ActivityT,
+        ActionT,
+    ]:
+        return self
+
+    def __exit__(
+        self,
+        exception_type: type[BaseException] | None,
+        exception: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()
 
     def save(self, path: str | Path) -> None:
         if not isinstance(self._action, Checkpointable):
@@ -152,6 +183,30 @@ class Agent(Generic[ObservationT, StimulusT, ReinforcementT, ActivityT, ActionT]
             raise TypeError(f"The {role} component does not expose its configuration")
         return dict(component.configuration())
 
+    @overload
+    @classmethod
+    def from_preset(
+        cls,
+        name: Literal["malecns-visual-turning"],
+        *,
+        data_dir: str | Path = Path("data"),
+        dynamics: str = "stonkfly-v1",
+        backend: str = "auto",
+        learning: bool = True,
+    ) -> VisualTurningPreset: ...
+
+    @overload
+    @classmethod
+    def from_preset(
+        cls,
+        name: Literal["malecns-kc-conditioning"],
+        *,
+        data_dir: str | Path = Path("data"),
+        dynamics: str = "stonkfly-v1",
+        backend: str = "auto",
+        learning: bool = True,
+    ) -> KCConditioningPreset: ...
+
     @classmethod
     def from_preset(
         cls,
@@ -161,13 +216,7 @@ class Agent(Generic[ObservationT, StimulusT, ReinforcementT, ActivityT, ActionT]
         dynamics: str = "stonkfly-v1",
         backend: str = "auto",
         learning: bool = True,
-    ) -> Agent[
-        NDArray[uint8],
-        NDArray[uint8],
-        CurrentPulse | None,
-        NeuralActivity,
-        Turn,
-    ]:
+    ) -> PresetAgent:
         from fastconnectome.presets import build_preset
 
         return build_preset(
@@ -178,6 +227,7 @@ class Agent(Generic[ObservationT, StimulusT, ReinforcementT, ActivityT, ActionT]
             learning=learning,
         )
 
+    @overload
     @classmethod
     def load_policy(
         cls,
@@ -185,13 +235,52 @@ class Agent(Generic[ObservationT, StimulusT, ReinforcementT, ActivityT, ActionT]
         *,
         data_dir: str | Path = Path("data"),
         backend: str = "auto",
-    ) -> Agent[
+        preset: Literal["malecns-visual-turning"] = "malecns-visual-turning",
+    ) -> VisualTurningPreset: ...
+
+    @overload
+    @classmethod
+    def load_policy(
+        cls,
+        path: str | Path,
+        *,
+        data_dir: str | Path = Path("data"),
+        backend: str = "auto",
+        preset: Literal["malecns-kc-conditioning"],
+    ) -> KCConditioningPreset: ...
+
+    @classmethod
+    def load_policy(
+        cls,
+        path: str | Path,
+        *,
+        data_dir: str | Path = Path("data"),
+        backend: str = "auto",
+        preset: str = "malecns-visual-turning",
+    ) -> PresetAgent:
+        from fastconnectome.presets import load_policy
+
+        return load_policy(
+            Path(path),
+            data_dir=Path(data_dir),
+            backend=backend,
+            preset=preset,
+        )
+
+
+if TYPE_CHECKING:
+    VisualTurningPreset = Agent[
         NDArray[uint8],
         NDArray[uint8],
         CurrentPulse | None,
         NeuralActivity,
         Turn,
-    ]:
-        from fastconnectome.presets import load_policy
-
-        return load_policy(Path(path), data_dir=Path(data_dir), backend=backend)
+    ]
+    KCConditioningPreset = Agent[
+        KCCue,
+        MaleCNSStimulus,
+        CurrentPulse | None,
+        NeuralActivity,
+        ApproachChoice,
+    ]
+    PresetAgent = VisualTurningPreset | KCConditioningPreset

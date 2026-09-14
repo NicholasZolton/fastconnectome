@@ -32,6 +32,7 @@ class FakeSimulator:
         self.restored: Path | None = None
         self.did_restore = False
         self.kept_learning = False
+        self.closed = False
 
     @property
     def info(self) -> ModelInfo:
@@ -62,6 +63,9 @@ class FakeSimulator:
     def restore(self, path: Path) -> None:
         self.restored = path
         self.did_restore = path.read_text() == "simulator"
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class EvenDecoder:
@@ -122,3 +126,12 @@ def test_agent_resets_decoder_and_simulator(tmp_path: Path) -> None:
     assert simulator.kept_learning
     assert simulator.did_restore
     assert decoder.resets == 0
+
+
+def test_agent_context_manager_closes_backend() -> None:
+    agent, simulator, _ = make_agent()
+
+    with agent:
+        assert not simulator.closed
+
+    assert simulator.closed
