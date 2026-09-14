@@ -1,0 +1,686 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FastConnectome cue conditioning</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #edf3f2;
+      --paper: #fbfdfc;
+      --ink: #142b32;
+      --muted: #667b80;
+      --line: #ccdad8;
+      --teal: #0f7b78;
+      --teal-pale: #dcecea;
+      --coral: #c8535c;
+      --coral-pale: #f3dcdf;
+      --amber: #ae742b;
+      --green: #3b8064;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", sans-serif;
+      --mono: ui-monospace, "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--ink);
+      font-family: var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button { font: inherit; }
+
+    .page {
+      width: min(1240px, calc(100% - 48px));
+      margin: 0 auto;
+      padding: 36px 0 28px;
+    }
+
+    .masthead {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 48px;
+      align-items: end;
+      padding: 0 0 28px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .eyebrow,
+    .section-label,
+    .metric-label,
+    .metadata,
+    .stage,
+    .control-label {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: 0.075em;
+      line-height: 1.35;
+      text-transform: uppercase;
+    }
+
+    .eyebrow { color: var(--teal); }
+
+    h1 {
+      margin: 9px 0 7px;
+      font-size: clamp(34px, 4vw, 52px);
+      font-weight: 690;
+      letter-spacing: -0.048em;
+      line-height: 1;
+    }
+
+    .dek {
+      max-width: 720px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.5;
+    }
+
+    .metadata {
+      display: grid;
+      grid-template-columns: repeat(3, auto);
+      gap: 24px;
+      color: var(--muted);
+    }
+
+    .metadata strong {
+      display: block;
+      margin-top: 4px;
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 15px;
+      letter-spacing: -0.01em;
+      text-transform: none;
+    }
+
+    .assay {
+      display: grid;
+      grid-template-columns: 250px minmax(500px, 1fr) 248px;
+      gap: 14px;
+      margin-top: 22px;
+    }
+
+    .panel {
+      min-width: 0;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      min-height: 53px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .section-label { color: var(--muted); }
+    .section-label b { margin-right: 9px; color: var(--teal); }
+
+    .stimulus-body { padding: 18px; }
+
+    .stimulus-frame {
+      position: relative;
+      overflow: hidden;
+      aspect-ratio: 1;
+      background: #e1ebed;
+      border: 1px solid var(--line);
+    }
+
+    .stimulus-frame::after {
+      position: absolute;
+      inset: 0;
+      border: 8px solid rgb(251 253 252 / 36%);
+      content: "";
+      pointer-events: none;
+    }
+
+    .stimulus-frame img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      image-rendering: auto;
+    }
+
+    .stimulus-name {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      margin-top: 18px;
+    }
+
+    .stimulus-name strong {
+      font-size: 20px;
+      letter-spacing: -0.025em;
+    }
+
+    .cue {
+      color: var(--teal);
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .confidence-track {
+      overflow: hidden;
+      height: 5px;
+      margin-top: 14px;
+      background: var(--teal-pale);
+      border-radius: 5px;
+    }
+
+    .confidence-fill {
+      width: 0;
+      height: 100%;
+      background: var(--teal);
+      transition: width 260ms ease;
+    }
+
+    .confidence-copy {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 9px;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .pathway-body { padding: 18px 22px 20px; }
+
+    .pathway-labels {
+      display: grid;
+      grid-template-columns: 1fr 1.25fr 1fr;
+      align-items: start;
+    }
+
+    .pathway-labels > div:nth-child(2) { text-align: center; }
+    .pathway-labels > div:last-child { text-align: right; }
+
+    .pathway-labels strong {
+      display: block;
+      font-size: 14px;
+      letter-spacing: -0.015em;
+    }
+
+    .pathway-labels span {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 10px;
+      text-transform: uppercase;
+    }
+
+    .connectome {
+      position: relative;
+      height: 142px;
+      margin-top: 7px;
+    }
+
+    .connectome svg { width: 100%; height: 100%; overflow: visible; }
+    .edge { fill: none; stroke: var(--line); stroke-width: 1; }
+    .edge.learned { stroke: var(--coral); stroke-width: 1.35; }
+    body[data-stage="baseline"] .edge.learned { stroke: var(--line); stroke-width: 1; }
+    .node-source { fill: var(--teal); }
+    .node-target { fill: var(--green); }
+
+    .edge.pulse {
+      stroke-dasharray: 2 9;
+      stroke-width: 2;
+      animation: signal 1.8s linear infinite;
+    }
+
+    @keyframes signal { to { stroke-dashoffset: -44; } }
+
+    .reward {
+      position: absolute;
+      top: 47px;
+      left: 50%;
+      display: flex;
+      gap: 7px;
+      align-items: center;
+      padding: 6px 9px;
+      background: var(--coral-pale);
+      color: var(--coral);
+      border: 1px solid #e7bfc3;
+      border-radius: 999px;
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      opacity: 0;
+      text-transform: uppercase;
+      transform: translate(-50%, -8px);
+      transition: opacity 180ms ease, transform 180ms ease;
+    }
+
+    body[data-stage="training"] .reward {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+
+    .reward::before {
+      width: 7px;
+      height: 7px;
+      background: var(--coral);
+      border-radius: 50%;
+      content: "";
+    }
+
+    .response-chart {
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+
+    .chart-title {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .chart-title span:last-child { color: var(--coral); }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 58px minmax(0, 1fr) 36px;
+      gap: 9px;
+      align-items: center;
+      margin-top: 9px;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 10px;
+      text-transform: uppercase;
+    }
+
+    .bar-track {
+      position: relative;
+      height: 8px;
+      background: #e7eeee;
+      border-radius: 8px;
+    }
+
+    .bar-fill {
+      height: 100%;
+      background: #91a3a5;
+      border-radius: inherit;
+      transition: width 260ms ease;
+    }
+
+    .bar-fill.current { background: var(--green); }
+
+    .threshold {
+      position: absolute;
+      top: -4px;
+      bottom: -4px;
+      left: 73.846%;
+      width: 2px;
+      background: var(--coral);
+    }
+
+    .stage {
+      color: var(--teal);
+      white-space: nowrap;
+    }
+
+    .decision-body {
+      display: flex;
+      min-height: 334px;
+      padding: 22px;
+      flex-direction: column;
+    }
+
+    .spike-count {
+      margin-top: 20px;
+      font-size: 62px;
+      font-variant-numeric: tabular-nums;
+      font-weight: 675;
+      letter-spacing: -0.06em;
+      line-height: 0.9;
+    }
+
+    .spike-unit {
+      margin-top: 11px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .decision-rule { margin: 27px 0 20px; border: 0; border-top: 1px solid var(--line); }
+
+    .action {
+      color: var(--green);
+      font-size: 22px;
+      font-weight: 720;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    body[data-action="avoid"] .action { color: var(--amber); }
+
+    .action-copy {
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .change-count {
+      margin-top: auto;
+      padding-top: 22px;
+      color: var(--coral);
+      font-family: var(--mono);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .evidence {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1.12fr;
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    .evidence-item {
+      min-height: 84px;
+      padding: 16px 18px;
+      background: rgb(251 253 252 / 62%);
+      border-left: 3px solid var(--line);
+    }
+
+    .evidence-item.learned { border-color: var(--green); }
+    .evidence-item.fixed { border-color: var(--teal); }
+    .evidence-item.control { border-color: var(--coral); }
+
+    .evidence-item p {
+      margin: 7px 0 0;
+      font-size: 14px;
+      font-weight: 620;
+      line-height: 1.35;
+    }
+
+    .timeline {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: center;
+      margin-top: 20px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+    }
+
+    .playback {
+      display: flex;
+      gap: 7px;
+    }
+
+    .playback button {
+      min-width: 36px;
+      height: 32px;
+      padding: 0 11px;
+      background: transparent;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .playback button:hover { border-color: var(--teal); color: var(--teal); }
+    .playback button:focus-visible { outline: 3px solid var(--teal-pale); outline-offset: 2px; }
+
+    .ticks {
+      display: grid;
+      grid-auto-columns: minmax(4px, 1fr);
+      grid-auto-flow: column;
+      gap: 4px;
+    }
+
+    .tick {
+      height: 5px;
+      padding: 0;
+      background: var(--line);
+      border: 0;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    .tick.training { background: #dfb4b7; }
+    .tick.complete { background: var(--teal); }
+    .tick.active { height: 9px; background: var(--coral); transform: translateY(-2px); }
+
+    .timeline-note {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 10px;
+      white-space: nowrap;
+    }
+
+    @media (max-width: 980px) {
+      .page { width: min(720px, calc(100% - 32px)); }
+      .masthead { grid-template-columns: 1fr; gap: 20px; }
+      .metadata { justify-content: start; }
+      .assay { grid-template-columns: 1fr; }
+      .evidence { grid-template-columns: 1fr; }
+      .timeline { grid-template-columns: 1fr; }
+      .timeline-note { display: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="masthead">
+      <div>
+        <div class="eyebrow">FastConnectome / conditioning assay</div>
+        <h1>A cue acquires positive value.</h1>
+        <p class="dek">A fixed visual adapter sends a synthetic dog cue into the complete MaleCNS graph. PAM11 reward changes existing KC→MBON synapses.</p>
+      </div>
+      <div class="metadata" aria-label="Model details">
+        <div>Model<strong>MaleCNS v1.0</strong></div>
+        <div>Neurons<strong>166,700</strong></div>
+        <div>Edges<strong>25.6 million</strong></div>
+      </div>
+    </header>
+
+    <section class="assay" aria-label="Conditioning result">
+      <article class="panel">
+        <header class="panel-head">
+          <div class="section-label"><b>01</b> Fixed visual adapter</div>
+        </header>
+        <div class="stimulus-body">
+          <div class="stimulus-frame"><img id="stimulus-image" alt="Synthetic dog or cat cue"></div>
+          <div class="stimulus-name"><strong id="stimulus-name">Dog card</strong><span class="cue" id="cue">Cue A</span></div>
+          <div class="confidence-track"><div class="confidence-fill" id="confidence-fill"></div></div>
+          <div class="confidence-copy"><span>Template match</span><span id="confidence">0% dog</span></div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <header class="panel-head">
+          <div class="section-label"><b>02</b> Plastic pathway</div>
+          <div class="stage" id="stage">Before training</div>
+        </header>
+        <div class="pathway-body">
+          <div class="pathway-labels">
+            <div><strong>KCab-m</strong><span>Kenyon cells</span></div>
+            <div><strong>KC→MBON</strong><span>7,835 candidate synapses</span></div>
+            <div><strong>MBON07</strong><span>Approach readout</span></div>
+          </div>
+          <div class="connectome">
+            <svg id="connectome" viewBox="0 0 520 142" role="img" aria-label="KC to MBON connections"></svg>
+            <div class="reward">PAM11 reward</div>
+          </div>
+          <div class="response-chart">
+            <div class="chart-title metric-label"><span>MBON07 response</span><span>Approach threshold / <b id="threshold-label"></b></span></div>
+            <div class="bar-row"><span>Before</span><div class="bar-track"><div class="bar-fill" id="baseline-bar"></div><i class="threshold"></i></div><b id="baseline-spikes">0</b></div>
+            <div class="bar-row"><span>Current</span><div class="bar-track"><div class="bar-fill current" id="current-bar"></div><i class="threshold"></i></div><b id="current-spikes">0</b></div>
+          </div>
+        </div>
+      </article>
+
+      <aside class="panel">
+        <header class="panel-head"><div class="section-label"><b>03</b> Behavior</div></header>
+        <div class="decision-body">
+          <div class="stage" id="test-kind">Held-out dog</div>
+          <div class="spike-count" id="spike-count">0</div>
+          <div class="spike-unit">MBON07 spikes</div>
+          <hr class="decision-rule">
+          <div class="action" id="action">Avoid</div>
+          <div class="action-copy" id="action-copy">Below the fixed 480-spike threshold.</div>
+          <div class="change-count" id="change-count">0 changed KC→MBON connections</div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="evidence" aria-label="Experiment boundaries">
+      <article class="evidence-item learned"><div class="control-label">Learned association</div><p>Dog cue → positive value</p></article>
+      <article class="evidence-item fixed"><div class="control-label">Held fixed</div><p>Pixel template → cue A or B</p></article>
+      <article class="evidence-item control"><div class="control-label">Negative control</div><p id="control-result">Cat cue held out until the final test</p></article>
+    </section>
+
+    <footer class="timeline">
+      <div class="playback">
+        <button id="previous" type="button" aria-label="Previous event">←</button>
+        <button id="play" type="button">Pause</button>
+        <button id="next" type="button" aria-label="Next event">→</button>
+      </div>
+      <div class="ticks" id="ticks" aria-label="Experiment timeline"></div>
+      <div class="timeline-note">baseline · 20 pairings · dog test · cat control</div>
+    </footer>
+  </main>
+
+  <script id="events-data" type="application/json">__FASTCONNECTOME_EVENTS__</script>
+  <script>
+    const events = JSON.parse(document.getElementById("events-data").textContent);
+    const byId = (id) => document.getElementById(id);
+    const baseline = events.find((event) => event.stage === "baseline");
+    const control = events.find((event) => event.stage === "cat-test");
+    const maximumSpikes = 650;
+    let index = 0;
+    let timer = null;
+    let playing = true;
+
+    function buildConnectome() {
+      const svg = byId("connectome");
+      const namespace = "http://www.w3.org/2000/svg";
+      for (let line = 0; line < 20; line += 1) {
+        const sourceY = 20 + line * 5.15;
+        const targetY = 20 + ((line * 7) % 20) * 5.15;
+        const midpoint = (sourceY + targetY) / 2 + ((line % 5) - 2) * 4;
+        const path = document.createElementNS(namespace, "path");
+        path.setAttribute("d", `M 10 ${sourceY} C 142 ${sourceY}, 178 ${midpoint}, 260 ${midpoint} S 378 ${targetY}, 510 ${targetY}`);
+        path.setAttribute("class", line % 4 === 0 ? "edge learned" : "edge");
+        if (line === 8) path.classList.add("pulse");
+        svg.appendChild(path);
+        for (const [x, y, className] of [[7, sourceY, "node-source"], [513, targetY, "node-target"]]) {
+          const node = document.createElementNS(namespace, "circle");
+          node.setAttribute("cx", x);
+          node.setAttribute("cy", y);
+          node.setAttribute("r", "2.4");
+          node.setAttribute("class", className);
+          svg.appendChild(node);
+        }
+      }
+    }
+
+    function labelFor(event) {
+      if (event.stage === "baseline") return "Before training";
+      if (event.stage === "training") return `Pairing ${String(event.trial).padStart(2, "0")} / ${event.trials}`;
+      if (event.stage === "dog-test") return "Held-out dog";
+      return "Cat control";
+    }
+
+    function render(nextIndex) {
+      index = Math.max(0, Math.min(nextIndex, events.length - 1));
+      const event = events[index];
+      document.body.dataset.stage = event.stage;
+      document.body.dataset.action = event.action;
+      byId("stimulus-image").src = event.image;
+      byId("stimulus-name").textContent = event.cue === "A" ? "Dog card" : "Cat control";
+      byId("cue").textContent = `Cue ${event.cue}`;
+      byId("confidence-fill").style.width = `${event.confidence * 100}%`;
+      byId("confidence").textContent = `${Math.round(event.confidence * 100)}% dog`;
+      byId("stage").textContent = labelFor(event);
+      byId("test-kind").textContent = event.stage === "training" ? "Live training state" : labelFor(event);
+      byId("baseline-bar").style.width = `${Math.min(100, baseline.spikes / maximumSpikes * 100)}%`;
+      byId("current-bar").style.width = `${Math.min(100, event.spikes / maximumSpikes * 100)}%`;
+      byId("baseline-spikes").textContent = baseline.spikes;
+      byId("current-spikes").textContent = event.spikes;
+      byId("threshold-label").textContent = event.threshold;
+      document.querySelectorAll(".threshold").forEach((marker) => {
+        marker.style.left = `${event.threshold / maximumSpikes * 100}%`;
+      });
+      byId("spike-count").textContent = event.spikes;
+      byId("action").textContent = event.action;
+      byId("action-copy").textContent = event.action === "approach" ? `Above the fixed ${event.threshold}-spike threshold.` : `Below the fixed ${event.threshold}-spike threshold.`;
+      byId("change-count").textContent = `${event.changed.toLocaleString()} changed KC→MBON connections`;
+      byId("control-result").textContent = `Cat cue → ${control.spikes} spikes → ${control.action}`;
+      document.querySelectorAll(".tick").forEach((tick, tickIndex) => {
+        tick.classList.toggle("active", tickIndex === index);
+        tick.classList.toggle("complete", tickIndex < index);
+      });
+    }
+
+    function stop() {
+      window.clearTimeout(timer);
+      timer = null;
+      playing = false;
+      byId("play").textContent = index === events.length - 1 ? "Replay" : "Play";
+    }
+
+    function advance() {
+      if (!playing) return;
+      if (index === events.length - 1) {
+        stop();
+        return;
+      }
+      render(index + 1);
+      timer = window.setTimeout(advance, events[index].stage === "training" ? 320 : 950);
+    }
+
+    function play() {
+      if (index === events.length - 1) render(0);
+      playing = true;
+      byId("play").textContent = "Pause";
+      timer = window.setTimeout(advance, events[index].stage === "training" ? 320 : 950);
+    }
+
+    for (const [tickIndex, event] of events.entries()) {
+      const tick = document.createElement("button");
+      tick.type = "button";
+      tick.className = `tick ${event.stage === "training" ? "training" : ""}`;
+      tick.title = labelFor(event);
+      tick.setAttribute("aria-label", labelFor(event));
+      tick.addEventListener("click", () => { stop(); render(tickIndex); });
+      byId("ticks").appendChild(tick);
+    }
+
+    byId("previous").addEventListener("click", () => { stop(); render(index - 1); });
+    byId("next").addEventListener("click", () => { stop(); render(index + 1); });
+    byId("play").addEventListener("click", () => { playing ? stop() : play(); });
+    buildConnectome();
+
+    const requestedStage = window.location.hash.slice(1);
+    const requestedIndex = events.findIndex((event) => event.stage === requestedStage);
+    if (requestedIndex >= 0) {
+      playing = false;
+      render(requestedIndex);
+      byId("play").textContent = "Play";
+    } else {
+      render(0);
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) stop();
+      else timer = window.setTimeout(advance, 900);
+    }
+  </script>
+</body>
+</html>

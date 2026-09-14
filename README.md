@@ -19,11 +19,11 @@ simulator does not prune the graph for faster examples.
 ## Try the dog conditioning demo
 
 The shortest useful demo pairs a synthetic dog cue with positive reinforcement,
-then tests a new dog drawing and a cat control. It opens an animation of the
-pixel detector, Kenyon cells, changing KC→MBON connections, MBON07 activity, and
-the resulting approach or avoidance response.
+then tests a new dog drawing and a cat control. It opens a browser report of the
+pixel detector, changing KC→MBON connections, MBON07 activity, and the resulting
+approach or avoidance response.
 
-![Dog conditioning animation showing the fixed vision adapter, KC to MBON plasticity, and an approach response](docs/images/dog-conditioning.png)
+![Dog conditioning report showing the fixed vision adapter, KC to MBON plasticity, and an approach response](docs/images/dog-conditioning.png)
 
 Python 3.11 and a C++17 compiler are required. On macOS, the Metal backend also
 requires the Swift compiler supplied by Apple developer tools.
@@ -33,6 +33,10 @@ uv sync --all-extras
 uv run fastconnectome prepare malecns-v1 --data-dir data
 uv run python examples/learn_dogs.py --data-dir data
 ```
+
+The command writes a self-contained report to `runs/dog-conditioning.html` and
+opens it in your browser. Pass `--no-open` to create the report without opening
+it.
 
 Preparing MaleCNS downloads about 1.1 GB and needs several additional GB while
 building the graph. If you prepared it elsewhere, pass that directory to
@@ -63,10 +67,10 @@ Dog classification comes from the fixed template matcher. KC→MBON plasticity
 learns the value of its output cue. The connectome does not learn visual
 features or recognize photographs of dogs.
 
-Use `--no-animation` for terminal output:
+Use `--text` for terminal output:
 
 ```sh
-uv run python examples/learn_dogs.py --no-animation --data-dir data
+uv run python examples/learn_dogs.py --text --data-dir data
 ```
 
 ## Python quickstart
@@ -241,7 +245,7 @@ change which observations the agent sees.
 
 | Command | Purpose |
 | --- | --- |
-| `uv run python examples/learn_dogs.py --data-dir data` | Animated synthetic dog conditioning |
+| `uv run python examples/learn_dogs.py --data-dir data` | Browser report for synthetic dog conditioning |
 | `uv run python examples/quickstart_kc_mbon.py --data-dir data` | Smallest preset, policy export, and frozen reload |
 | `uv run python examples/learn_kc_mbon.py --data-dir data` | Counterbalanced cue, no-reward, frozen-plasticity, and memory-erasure controls |
 | `uv run python examples/train_pong.py --data-dir data` | Native KC→MBON Pong experiment with exact checkpoint replay |

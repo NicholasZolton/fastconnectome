@@ -1,24 +1,24 @@
-"""Animate a fixed dog detector feeding native KC→MBON conditioning."""
+"""Run a fixed dog detector through native KC→MBON conditioning."""
 
 from __future__ import annotations
 
 import argparse
+import base64
+import json
+import struct
+import webbrowser
+import zlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from queue import Empty, Queue
-from threading import Event as ThreadEvent, Thread
-from typing import TYPE_CHECKING
+from threading import Event as ThreadEvent
 
 import numpy as np
 from numpy.typing import NDArray
 
 from fastconnectome import Agent, ApproachChoice, KCCue
 from fastconnectome.types import StepResult
-
-if TYPE_CHECKING:
-    import pygame
 
 RGBFrame = NDArray[np.uint8]
 Color = tuple[int, int, int]
@@ -27,6 +27,7 @@ DOG_TRAIN_VARIANTS = (0, 1)
 DOG_TEST_VARIANT = 2
 CAT_TEST_VARIANT = 2
 REQUIRED_DATA_FILES = ("graph.npz", "annotations.feather")
+REPORT_TEMPLATE = Path(__file__).with_name("dog_conditioning_report.html")
 
 
 class DemoStage(StrEnum):
@@ -53,7 +54,7 @@ class DemoEvent:
 
 
 def validate_data_dir(data_dir: Path) -> Path:
-    """Resolve a prepared MaleCNS directory before opening the animation."""
+    """Resolve a prepared MaleCNS directory before running the experiment."""
 
     resolved = data_dir.expanduser().resolve()
     missing = [name for name in REQUIRED_DATA_FILES if not (resolved / name).is_file()]
@@ -253,7 +254,7 @@ def run_experiment(
     publish: Callable[[DemoEvent], None],
     cancelled: ThreadEvent,
 ) -> None:
-    """Run the real conditioning experiment and publish animation snapshots."""
+    """Run the conditioning experiment and publish each recorded state."""
 
     vision = TemplateDogVision()
     test_dog = render_dog(DOG_TEST_VARIANT)
@@ -371,273 +372,74 @@ def _run_text(args: argparse.Namespace) -> None:
         )
 
 
-def _run_animation(args: argparse.Namespace) -> None:
-    import pygame
+def _png_chunk(kind: bytes, data: bytes) -> bytes:
+    checksum = zlib.crc32(kind + data)
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", checksum)
 
-    pygame.init()
-    screen = pygame.display.set_mode((1180, 680))
-    pygame.display.set_caption("FastConnectome — Dog conditioning")
-    display_font = pygame.font.SysFont("Avenir Next", 28, bold=True)
-    body_font = pygame.font.SysFont("Avenir Next", 17)
-    utility_font = pygame.font.SysFont("Menlo", 14)
-    clock = pygame.time.Clock()
-    queue: Queue[DemoEvent | BaseException | None] = Queue()
-    cancelled = ThreadEvent()
 
-    def worker() -> None:
-        try:
-            run_experiment(
-                args.data_dir,
-                args.backend,
-                args.trials,
-                args.policy,
-                queue.put,
-                cancelled,
-            )
-        except BaseException as error:
-            queue.put(error)
-        finally:
-            queue.put(None)
+def _frame_data_uri(frame: RGBFrame) -> str:
+    """Encode a synthetic RGB card without adding an image dependency."""
 
-    thread = Thread(target=worker, name="dog-conditioning", daemon=True)
-    thread.start()
-    timeline: list[DemoEvent] = []
-    current_index = -1
-    next_event_at = 0
-    worker_done = False
-    failure: BaseException | None = None
-    running = True
+    height, width, channels = frame.shape
+    if channels != 3 or frame.dtype != np.uint8:
+        raise ValueError("Report frames must be RGB uint8 images")
+    scanlines = b"".join(b"\x00" + frame[row].tobytes() for row in range(height))
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", header)
+        + _png_chunk(b"IDAT", zlib.compress(scanlines, level=9))
+        + _png_chunk(b"IEND", b"")
+    )
+    encoded = base64.b64encode(png).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
 
-    navy: Color = (22, 29, 52)
-    paper: Color = (244, 240, 228)
-    cyan: Color = (79, 194, 210)
-    pink: Color = (241, 82, 132)
-    lime: Color = (170, 218, 94)
-    amber: Color = (241, 163, 64)
-    muted: Color = (121, 130, 150)
 
-    def text(
-        value: str,
-        position: tuple[int, int],
-        color: Color,
-        font: pygame.font.Font,
-    ) -> None:
-        surface = font.render(value, True, color)
-        screen.blit(surface, position)
+def _report_event(event: DemoEvent) -> dict[str, str | int | float]:
+    return {
+        "stage": event.stage.value,
+        "image": _frame_data_uri(event.frame),
+        "confidence": event.vision.dog_confidence,
+        "cue": event.vision.cue.name,
+        "spikes": int(event.response.metrics["mbon_spikes"]),
+        "threshold": int(event.response.metrics["approach_threshold_spikes"]),
+        "changed": event.response.learning.changed_connections,
+        "action": event.response.action.value,
+        "trial": event.trial,
+        "trials": event.trials,
+    }
 
-    while running:
-        for pygame_event in pygame.event.get():
-            if pygame_event.type == pygame.QUIT or (
-                pygame_event.type == pygame.KEYDOWN
-                and pygame_event.key in {pygame.K_ESCAPE, pygame.K_q}
-            ):
-                running = False
-            if (
-                pygame_event.type == pygame.KEYDOWN
-                and pygame_event.key == pygame.K_r
-                and timeline
-            ):
-                current_index = 0
-                next_event_at = pygame.time.get_ticks() + 500
 
-        try:
-            while True:
-                item = queue.get_nowait()
-                if item is None:
-                    worker_done = True
-                elif isinstance(item, BaseException):
-                    failure = item
-                else:
-                    timeline.append(item)
-        except Empty:
-            pass
+def write_report(events: list[DemoEvent], destination: Path) -> Path:
+    """Write a self-contained browser report for one completed experiment."""
 
-        now = pygame.time.get_ticks()
-        if timeline and current_index < 0:
-            current_index = 0
-            next_event_at = now + 650
-        elif current_index + 1 < len(timeline) and now >= next_event_at:
-            current_index += 1
-            delay = (
-                340
-                if timeline[current_index].stage is DemoStage.TRAINING
-                else 1200
-            )
-            next_event_at = now + delay
+    template = REPORT_TEMPLATE.read_text()
+    serialized = json.dumps(
+        [_report_event(event) for event in events],
+        separators=(",", ":"),
+    )
+    if "__FASTCONNECTOME_EVENTS__" not in template:
+        raise RuntimeError("Dog conditioning report template is missing its data marker")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(template.replace("__FASTCONNECTOME_EVENTS__", serialized))
+    return destination.resolve()
 
-        screen.fill(navy)
-        text("GOOD DOG / BAD DOG", (42, 28), paper, display_font)
-        text("a tiny associative-learning theatre", (43, 65), cyan, body_font)
 
-        current = timeline[current_index] if current_index >= 0 else None
-        pygame.draw.rect(screen, paper, (42, 112, 286, 376), border_radius=18)
-        if current is None:
-            text("Building the fly brain…", (72, 280), navy, body_font)
-        else:
-            image = pygame.surfarray.make_surface(current.frame.swapaxes(0, 1))
-            scaled_image = pygame.transform.smoothscale(image, (238, 238))
-            screen.blit(scaled_image, (66, 136))
-            dog_percent = round(current.vision.dog_confidence * 100)
-            text(
-                f"PIXEL DETECTOR  {dog_percent}% DOG",
-                (65, 397),
-                navy,
-                utility_font,
-            )
-            pygame.draw.rect(
-                screen,
-                (205, 207, 198),
-                (66, 428, 238, 10),
-                border_radius=5,
-            )
-            pygame.draw.rect(
-                screen,
-                amber,
-                (66, 428, round(238 * current.vision.dog_confidence), 10),
-                border_radius=5,
-            )
-            text(
-                f"routes to KC cue {current.vision.cue.name}",
-                (66, 453),
-                muted,
-                body_font,
-            )
-
-        centers = ((410, 216), (570, 216), (730, 216), (890, 216))
-        labels = (
-            "FIXED\nVISION",
-            "KENYON\nCELLS",
-            "KC > MBON\nSYNAPSES",
-            "MBON07\nREADOUT",
-        )
-        colors = (amber, cyan, pink, lime)
-        stages = zip(centers, labels, colors, strict=True)
-        for index, (center, label, color) in enumerate(stages):
-            if index:
-                pygame.draw.line(
-                    screen,
-                    muted,
-                    (centers[index - 1][0] + 54, 216),
-                    (center[0] - 54, 216),
-                    3,
-                )
-            pygame.draw.circle(screen, color, center, 55, width=3)
-            first, second = label.split("\n")
-            first_surface = utility_font.render(first, True, paper)
-            second_surface = utility_font.render(second, True, paper)
-            first_rect = first_surface.get_rect(center=(center[0], center[1] - 9))
-            second_rect = second_surface.get_rect(center=(center[0], center[1] + 11))
-            screen.blit(first_surface, first_rect)
-            screen.blit(second_surface, second_rect)
-
-        if current is not None:
-            phase = (now % 1400) / 1400
-            route_start = centers[0][0]
-            route_end = centers[-1][0]
-            particle_x = round(route_start + phase * (route_end - route_start))
-            pygame.draw.circle(screen, paper, (particle_x, 216), 5)
-            if current.stage is DemoStage.TRAINING:
-                pygame.draw.line(screen, pink, (730, 91), (730, 151), 4)
-                pygame.draw.circle(screen, pink, (730, 82), 11)
-                text("PAM11 + REWARD", (668, 52), pink, utility_font)
-
-            spikes = int(current.response.metrics["mbon_spikes"])
-            threshold = int(current.response.metrics["approach_threshold_spikes"])
-            meter_width = min(220, round(220 * spikes / 650))
-            pygame.draw.rect(
-                screen,
-                (52, 61, 86),
-                (410, 342, 220, 20),
-                border_radius=10,
-            )
-            pygame.draw.rect(
-                screen,
-                lime,
-                (410, 342, meter_width, 20),
-                border_radius=10,
-            )
-            threshold_x = 410 + round(220 * threshold / 650)
-            pygame.draw.line(screen, paper, (threshold_x, 335), (threshold_x, 369), 2)
-            text(f"MBON07 {spikes} spikes", (410, 378), paper, utility_font)
-            text(
-                f"approach threshold {threshold}",
-                (410, 401),
-                muted,
-                utility_font,
-            )
-
-            changed = current.response.learning.changed_connections
-            text(
-                f"{changed:,} changed KC > MBON connections",
-                (410, 454),
-                pink,
-                body_font,
-            )
-            action_color = (
-                lime
-                if current.response.action is ApproachChoice.APPROACH
-                else amber
-            )
-            text(
-                current.response.action.value.upper(),
-                (848, 345),
-                action_color,
-                display_font,
-            )
-
-            fly_x = (
-                885 if current.response.action is ApproachChoice.APPROACH else 786
-            )
-            wing_phase = 7 + round(4 * np.sin(now / 90))
-            pygame.draw.ellipse(
-                screen,
-                cyan,
-                (fly_x - 23, 411 - wing_phase, 25, 17),
-                width=2,
-            )
-            pygame.draw.ellipse(
-                screen,
-                cyan,
-                (fly_x + 1, 411 - wing_phase, 25, 17),
-                width=2,
-            )
-            pygame.draw.ellipse(screen, paper, (fly_x - 9, 405, 26, 43))
-            pygame.draw.circle(screen, amber, (1025, 425), 31)
-            text("DOG", (1007, 416), navy, utility_font)
-
-            if current.stage is DemoStage.BASELINE:
-                status = "Before training"
-            elif current.stage is DemoStage.TRAINING:
-                status = (
-                    f"Pairing dog cue + reward · "
-                    f"trial {current.trial}/{current.trials}"
-                )
-            elif current.stage is DemoStage.DOG_TEST:
-                status = "Frozen test · new dog card"
-            else:
-                status = "Frozen control · cat card"
-            text(status, (410, 504), paper, display_font)
-        elif failure is not None:
-            text("Experiment failed", (410, 342), pink, display_font)
-
-        pygame.draw.line(screen, (60, 69, 93), (42, 573), (1138, 573), 1)
-        text("THE FLY LEARNS", (42, 598), lime, utility_font)
-        text("dog cue = positive value", (42, 622), paper, body_font)
-        text("THE FIXED ADAPTER DOES", (385, 598), amber, utility_font)
-        text("pixel template > cue A or B", (385, 622), paper, body_font)
-        text("NOT CLAIMED", (792, 598), pink, utility_font)
-        text("real-world dog recognition", (792, 622), paper, body_font)
-        if worker_done and current_index + 1 >= len(timeline):
-            text("R replay  ·  Q quit", (965, 38), muted, utility_font)
-
-        pygame.display.flip()
-        clock.tick(60)
-
-    cancelled.set()
-    thread.join()
-    pygame.quit()
-    if failure is not None:
-        raise RuntimeError("Dog conditioning experiment failed") from failure
+def _run_browser(args: argparse.Namespace) -> None:
+    events: list[DemoEvent] = []
+    print(f"Running {args.trials} conditioning trials…")
+    run_experiment(
+        args.data_dir,
+        args.backend,
+        args.trials,
+        args.policy,
+        events.append,
+        ThreadEvent(),
+    )
+    report = write_report(events, args.report)
+    print(f"Wrote {report}")
+    if not args.no_open:
+        webbrowser.open(report.as_uri())
 
 
 def main() -> None:
@@ -650,7 +452,13 @@ def main() -> None:
         type=Path,
         default=Path("runs/dog-conditioning.fcmodel"),
     )
-    parser.add_argument("--no-animation", action="store_true")
+    parser.add_argument(
+        "--report",
+        type=Path,
+        default=Path("runs/dog-conditioning.html"),
+    )
+    parser.add_argument("--no-open", action="store_true")
+    parser.add_argument("--text", "--no-animation", dest="text", action="store_true")
     args = parser.parse_args()
     if args.trials <= 0:
         parser.error("trials must be positive")
@@ -658,10 +466,10 @@ def main() -> None:
         args.data_dir = validate_data_dir(args.data_dir)
     except FileNotFoundError as error:
         parser.error(str(error))
-    if args.no_animation:
+    if args.text:
         _run_text(args)
     else:
-        _run_animation(args)
+        _run_browser(args)
 
 
 if __name__ == "__main__":
