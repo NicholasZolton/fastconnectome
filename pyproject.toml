@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fastconnectome"
+version = "0.1.0"
+description = "Run connectomes as stateful agents"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = ["numpy==2.4.6"]
+
+[project.optional-dependencies]
+malecns = ["stonkfly"]
+examples = ["pygame-ce>=2.5.6,<3"]
+dev = [
+  "pytest>=9.1,<10",
+  "ty>=0.0.1a21",
+]
+
+[project.scripts]
+fastconnectome = "fastconnectome.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fastconnectome"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.uv.sources]
+stonkfly = { git = "https://github.com/nftechie/stonkfly.git", rev = "78ef3e05ab0fa086032098558d893667068944a0" }
