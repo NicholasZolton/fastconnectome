@@ -152,6 +152,23 @@ uv run python examples/train_pong.py --data-dir data --reward tracking
 This assay makes reward frequent and reports aligned steps, but it still keeps
 behavioral score and changed synapses separate.
 
+### A learning example that passes
+
+`train_pong.py` deliberately tests the unvalidated KC→MBON plasticity pathway;
+it can change synapses without improving Pong. For a smaller positive control,
+train an action-aware linear readout on frozen full-connectome activity:
+
+```sh
+uv run python examples/learn_pong_readout.py --data-dir data
+```
+
+The example presents a ball at training positions on either side of a fixed
+paddle, runs every image through the complete MaleCNS graph, and rewards the
+sampled `left` or `right` action. It evaluates unseen ball positions, saves the
+readout, loads it fresh, and repeats evaluation. This demonstrates ordinary
+reward-based policy learning from connectome features. It does **not** claim
+that the connectome's KC→MBON synapses learned the task; those remain frozen.
+
 ## Runners
 
 `run_episode` is synchronous and deterministic. `RealtimeRunner` advances an
