@@ -272,6 +272,21 @@ fly = Agent.from_preset(
 | `metal` | macOS, Metal device, and Apple developer tools | Metal spike propagation with NumPy plasticity state |
 | `auto` | Default | Metal when available, CPU otherwise |
 
+### Performance
+
+On a 16-core Apple M4 Max with 128 GB of memory, Metal cut neural compute time
+from 31.3 ms to 4.0 ms and full `Agent.step()` time from 33.1 ms to 5.8 ms:
+
+| Mean time per 20 ms neural step | CPU | Metal | Speedup |
+| --- | ---: | ---: | ---: |
+| Neural compute | 31.3 ms | 4.0 ms | 7.9× |
+| Full `Agent.step()` | 33.1 ms | 5.8 ms | 5.7× |
+
+The benchmark used 12 changing 120×200 RGB frames, learning enabled, and one
+reward pulse. It excluded the first Metal step for pipeline warm-up. Both
+backends produced 115,114 spikes over the run. Timings will vary with hardware
+and neural activity.
+
 The Metal backend propagates spikes on the GPU. Double-precision rate,
 eligibility, memory, and plasticity updates remain in NumPy. CPU and Metal use
 different floating-point accumulation orders, so long trajectories may cross
