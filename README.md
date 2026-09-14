@@ -64,6 +64,9 @@ cat images into those two cues before the same KC→MBON training loop:
 uv run python examples/learn_dogs.py --data-dir data
 ```
 
+If MaleCNS was prepared somewhere else, pass that directory instead. It must
+contain `graph.npz` and `annotations.feather`.
+
 The animation labels the boundary explicitly: the pixel adapter recognizes the
 simple drawings, while the simulated mushroom body learns that the dog cue has
 positive value. It does not claim that KC→MBON plasticity learned real-world dog

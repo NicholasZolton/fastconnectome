@@ -26,6 +26,7 @@ BACKGROUND: Color = (225, 235, 238)
 DOG_TRAIN_VARIANTS = (0, 1)
 DOG_TEST_VARIANT = 2
 CAT_TEST_VARIANT = 2
+REQUIRED_DATA_FILES = ("graph.npz", "annotations.feather")
 
 
 class DemoStage(StrEnum):
@@ -49,6 +50,23 @@ class DemoEvent:
     response: StepResult[ApproachChoice]
     trial: int
     trials: int
+
+
+def validate_data_dir(data_dir: Path) -> Path:
+    """Resolve a prepared MaleCNS directory before opening the animation."""
+
+    resolved = data_dir.expanduser().resolve()
+    missing = [name for name in REQUIRED_DATA_FILES if not (resolved / name).is_file()]
+    if missing:
+        names = ", ".join(missing)
+        raise FileNotFoundError(
+            f"MaleCNS data is not prepared in {resolved} (missing: {names}).\n"
+            "Prepare it with:\n"
+            "  uv run fastconnectome prepare malecns-v1 "
+            f"--data-dir {resolved}\n"
+            "Or pass --data-dir pointing to an existing prepared dataset."
+        )
+    return resolved
 
 
 def _ellipse(
@@ -636,6 +654,10 @@ def main() -> None:
     args = parser.parse_args()
     if args.trials <= 0:
         parser.error("trials must be positive")
+    try:
+        args.data_dir = validate_data_dir(args.data_dir)
+    except FileNotFoundError as error:
+        parser.error(str(error))
     if args.no_animation:
         _run_text(args)
     else:

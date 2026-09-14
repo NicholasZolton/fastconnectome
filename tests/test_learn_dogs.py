@@ -1,5 +1,9 @@
+from pathlib import Path
+
+import pytest
+
 from fastconnectome import KCCue
-from learn_dogs import TemplateDogVision, render_cat, render_dog
+from learn_dogs import TemplateDogVision, render_cat, render_dog, validate_data_dir
 
 
 def test_template_vision_routes_synthetic_dog_variants_to_one_cue() -> None:
@@ -12,3 +16,13 @@ def test_template_vision_routes_synthetic_dog_variants_to_one_cue() -> None:
     assert all(result.dog_confidence > 0.5 for result in dog_results)
     assert all(result.cue is KCCue.B for result in cat_results)
     assert all(result.dog_confidence < 0.5 for result in cat_results)
+
+
+def test_data_directory_is_checked_before_animation(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="fastconnectome prepare"):
+        validate_data_dir(tmp_path)
+
+    (tmp_path / "graph.npz").touch()
+    (tmp_path / "annotations.feather").touch()
+
+    assert validate_data_dir(tmp_path) == tmp_path.resolve()
